@@ -1,8 +1,12 @@
 import os
+import json
+import re
+from datetime import datetime
+from typing import Optional
+
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import Optional
 from openai import OpenAI
 
 # =========================
@@ -131,11 +135,12 @@ BUSINESSES = {
     # Тук по-късно ще добавяме и други бизнеси
 }
 
+APPOINTMENT_MARKER = "##APPOINTMENT##"
+
 
 def build_system_prompt(business_id: str) -> str:
     """
     Строи системния промпт според business_id.
-    За момента имаме само vlt_data, но архитектурата позволява да добавяме още.
     """
     biz = BUSINESSES.get(business_id, BUSINESSES["vlt_data"])
 
@@ -164,13 +169,40 @@ STYLE:
 - If something is not mentioned in the description, say that you cannot be sure and recommend direct
   contact with the {biz['name']} team instead of inventing facts.
 
+APPOINTMENTS / LEADS:
+- If the user is clearly interested in a project, offer, quotation, on-site work, data center build,
+  upgrade, migration or maintenance, you should gently collect contact details.
+- Ask naturally (not as a form) for:
+  * full name
+  * company (if any)
+  * email
+  * phone (if possible)
+  * country/city or site location
+  * short description of the project (scope, timelines, criticality)
+- When you have at least: name + at least one contact (email or phone) + short description,
+  you MUST append at the very end of your answer a single line in the following format:
+
+  ##APPOINTMENT## {{
+    "name": "...",
+    "company": "...",
+    "email": "...",
+    "phone": "...",
+    "location": "...",
+    "project_description": "...",
+    "preferred_contact": "...",
+    "language": "bg or en"
+  }}
+
+- The JSON must be valid and on a single line. Keys are ALWAYS in English.
+- Do NOT explain this JSON to the user and do NOT mention that you are creating an appointment.
+- In your visible answer, just confirm that the {biz['name']} team will contact them.
+
 TASK:
 - Answer only about data center infrastructure, services and capabilities of {biz['name']}.
-- If the user asks something unrelated (for example: weather, politics, random topics),
+- If the user asks something unrelated (weather, politics, random topics),
   politely explain that your role is to assist only with the services and expertise of {biz['name']}.
 - For contact or projects, encourage the user to briefly describe their project
-  (new data center, upgrade, migration, maintenance)
-  and then offer to contact the company via phone or email.
+  (new data center, upgrade, migration, maintenance) and then collect the data as explained above.
 """
 
 
@@ -180,16 +212,14 @@ TASK:
 
 app = FastAPI()
 
-
 # CORS – за момента отваряме за всички, за да не пречи при тестове от различни домейни
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],   # по-късно ще го стесним към конкретни домейни
+    allow_origins=["*"],  # по-късно може да го стесним към конкретни домейни
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
 
 
 class ChatRequest(BaseModel):
@@ -206,6 +236,31 @@ async def health():
     return {"status": "ok", "service": "chatvlt", "businesses": list(BUSINESSES.keys())}
 
 
+def save_appointment(business_id: str, json_str: str) -> None:
+    """
+    Опитва да parse-не JSON-a след APPOINTMENT маркера и да го запише във файл appointments.log
+    """
+    try:
+        # В json_str може да има и други неща, вадим само {...}
+        m = re.search(r"\{.*\}", json_str, re.DOTALL)
+        if not m:
+            return
+        data = json.loads(m.group(0))
+
+        record = {
+            "business_id": business_id,
+            "timestamp_utc": datetime.utcnow().isoformat() + "Z",
+            **data,
+        }
+
+        with open("appointments.log", "a", encoding="utf-8") as f:
+            f.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+    except Exception:
+        # Не хвърляме грешка към клиента, просто пропускаме записа ако нещо стане
+        pass
+
+
 @app.post("/chat", response_model=ChatResponse)
 async def chat(req: ChatRequest):
     if not req.message or not req.message.strip():
@@ -216,23 +271,24 @@ async def chat(req: ChatRequest):
 
     try:
         completion = client.chat.completions.create(
-            model="gpt-4.1-mini",   # можеш да смениш модела при нужда
+            model="gpt-4.1-mini",
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": req.message},
             ],
-            max_tokens=600,
+            max_tokens=700,
         )
 
-        reply = completion.choices[0].message.content.strip()
-        return ChatResponse(reply=reply)
+        raw_reply = completion.choices[0].message.content.strip()
 
-    except Exception as e:
-        # за дебъг може да логваш e
+        visible_reply = raw_reply
+        # Проверяваме за APPOINTMENT маркер
+        if APPOINTMENT_MARKER in raw_reply:
+            before, after = raw_reply.split(APPOINTMENT_MARKER, 1)
+            visible_reply = before.strip()
+            save_appointment(business_id, after.strip())
+
+        return ChatResponse(reply=visible_reply)
+
+    except Exception:
         raise HTTPException(status_code=500, detail="Error while generating response from ChatVLT.")
-
-
-# Локално стартиране:
-# if __name__ == "__main__":
-#     import uvicorn
-#     uvicorn.run(app, host="0.0.0.0", port=8000)

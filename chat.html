@@ -355,7 +355,7 @@
 
 <script>
 const API_URL = "https://chatvlt.onrender.com/chat";
-
+const BUSINESS_ID = "vlt_data";
 
 let typingRow = null;
 let chatOpened = false;
@@ -418,7 +418,10 @@ async function sendMessage() {
         const response = await fetch(API_URL, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ message: msg })
+            body: JSON.stringify({
+                message: msg,
+                business_id: BUSINESS_ID
+            })
         });
 
         const data = await response.json();
