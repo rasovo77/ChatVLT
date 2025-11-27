@@ -2,7 +2,7 @@ import os
 import json
 import re
 from datetime import datetime
-from typing import Optional
+from typing import Optional, List, Dict
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -132,16 +132,12 @@ BUSINESSES = {
         "tone_bg": "Професионален, спокоен, технически, но разбираем.",
         "tone_en": "Professional, calm and technical, but clear for non-technical people.",
     }
-    # Тук по-късно ще добавяме и други бизнеси
 }
 
 APPOINTMENT_MARKER = "##APPOINTMENT##"
 
 
 def build_system_prompt(business_id: str) -> str:
-    """
-    Строи системния промпт според business_id.
-    """
     biz = BUSINESSES.get(business_id, BUSINESSES["vlt_data"])
 
     return f"""
@@ -177,10 +173,6 @@ HANDLING CLIENT COMPANY NAMES:
 - You may say that you only have detailed information about {biz['name']},
   but you should still accept their company name as part of their project details.
 
-- Only if the user explicitly asks:
-  "What is company X?", "Tell me about company X" (where X is not {biz['name']}),
-  you should politely explain that you only have detailed information about {biz['name']}.
-
 APPOINTMENTS / LEADS:
 - If the user is clearly interested in a project, offer, quotation, on-site work, data center build,
   upgrade, migration or maintenance, you should gently collect contact details.
@@ -195,11 +187,6 @@ APPOINTMENTS / LEADS:
 
 - Always keep track of what information you already have.
   If some details are missing, ASK ONLY FOR THE MISSING FIELDS, not for everything again.
-  Examples:
-  - If you already have email and phone, ask only for name and a short description.
-  - If you have name and email, ask only for location and a brief project summary.
-  - If the user corrects or adds something (e.g. "My company is Mix Super"),
-    update your internal picture and DO NOT restart the whole questionnaire.
 
 - As soon as you have AT LEAST:
   * name
@@ -242,10 +229,10 @@ TASK:
 
 app = FastAPI()
 
-# CORS – за момента отваряме за всички, за да не пречи при тестове от различни домейни
+# CORS – отворено за тестове
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # по-късно може да го стесним към конкретни домейни
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -255,6 +242,8 @@ app.add_middleware(
 class ChatRequest(BaseModel):
     message: str
     business_id: Optional[str] = "vlt_data"
+    # history е по избор – ще го ползваме, когато го добавим във фронтенда
+    history: Optional[List[Dict[str, str]]] = None
 
 
 class ChatResponse(BaseModel):
@@ -267,11 +256,7 @@ async def health():
 
 
 def save_appointment(business_id: str, json_str: str) -> None:
-    """
-    Опитва да parse-не JSON-a след APPOINTMENT маркера и да го запише във файл appointments.log
-    """
     try:
-        # В json_str може да има и други неща, вадим само {...}
         m = re.search(r"\{.*\}", json_str, re.DOTALL)
         if not m:
             return
@@ -285,9 +270,7 @@ def save_appointment(business_id: str, json_str: str) -> None:
 
         with open("appointments.log", "a", encoding="utf-8") as f:
             f.write(json.dumps(record, ensure_ascii=False) + "\n")
-
     except Exception:
-        # Не хвърляме грешка към клиента, просто пропускаме записа ако нещо стане
         pass
 
 
@@ -299,20 +282,29 @@ async def chat(req: ChatRequest):
     business_id = req.business_id or "vlt_data"
     system_prompt = build_system_prompt(business_id)
 
+    # строим history, ако е изпратен от фронтенда
+    messages = [{"role": "system", "content": system_prompt}]
+
+    if req.history:
+        for m in req.history[-10:]:  # максимум последните 10 съобщения
+            role = m.get("role")
+            content = m.get("content", "")
+            if role in ("user", "assistant") and content:
+                messages.append({"role": role, "content": content})
+
+    # последното съобщение от потребителя
+    messages.append({"role": "user", "content": req.message})
+
     try:
         completion = client.chat.completions.create(
             model="gpt-4.1-mini",
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": req.message},
-            ],
+            messages=messages,
             max_tokens=700,
         )
 
         raw_reply = completion.choices[0].message.content.strip()
 
         visible_reply = raw_reply
-        # Проверяваме за APPOINTMENT маркер
         if APPOINTMENT_MARKER in raw_reply:
             before, after = raw_reply.split(APPOINTMENT_MARKER, 1)
             visible_reply = before.strip()
@@ -321,4 +313,7 @@ async def chat(req: ChatRequest):
         return ChatResponse(reply=visible_reply)
 
     except Exception:
-        raise HTTPException(status_code=500, detail="Error while generating response from ChatVLT.")
+        raise HTTPException(
+            status_code=500,
+            detail="Error while generating response from ChatVLT.",
+        )
