@@ -1,0 +1,8 @@
+# Ignore everything
+*
+
+# BUT keep these files
+!server.py
+!requirements.txt
+!chat.html
+!.gitignore
