@@ -181,21 +181,15 @@ TASK:
 app = FastAPI()
 
 
-# CORS – позволяваме твоя домейн + локално dev
-origins = [
-    "https://vltdatasolutions.com",
-    "http://vltdatasolutions.com",
-    "http://localhost",
-    "http://127.0.0.1",
-]
-
+# CORS – за момента отваряме за всички, за да не пречи при тестове от различни домейни
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,   # може да стане ["*"] ако искаш за тест
+    allow_origins=["*"],   # по-късно ще го стесним към конкретни домейни
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
 
 
 class ChatRequest(BaseModel):
