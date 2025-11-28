@@ -14,6 +14,9 @@ from bs4 import BeautifulSoup
 from urllib.parse import urljoin, urlparse
 from math import sqrt
 
+import smtplib
+from email.message import EmailMessage
+
 # =========================
 # OpenAI клиент
 # =========================
@@ -482,20 +485,20 @@ def build_site_context_message(business_id: str, user_query: str) -> Optional[st
     for p in pages:
         snippet = p["text"][:800]
         parts.append(
-            f"URL: {p['url']}\\nTITLE: {p['title']}\\nCONTENT SNIPPET:\\n{snippet}"
+            f"URL: {p['url']}\nTITLE: {p['title']}\nCONTENT SNIPPET:\n{snippet}"
         )
 
-    joined = "\\n\\n---\\n\\n".join(parts)
+    joined = "\n\n---\n\n".join(parts)
     return (
         "The following is trusted content taken directly from the official website "
         f"of {BUSINESSES.get(business_id, BUSINESSES['vlt_data'])['name']}."
-        "\\nUse it as an additional source of truth for:"
-        "\\n- product information (names, categories, sizes, models)"
-        "\\n- contact details (phone, email, address, working hours)"
-        "\\n- services, managers and team roles"
-        "\\n- descriptions of pages, sections and policies"
-        "\\n\\nALWAYS include clickable links (the URLs below) in your answer when helpful."
-        "\\n\\n"
+        "\nUse it as an additional source of truth for:"
+        "\n- product information (names, categories, sizes, models)"
+        "\n- contact details (phone, email, address, working hours)"
+        "\n- services, managers and team roles"
+        "\n- descriptions of pages, sections and policies"
+        "\n\nALWAYS include clickable links (the URLs below) in your answer when helpful."
+        "\n\n"
         f"{joined}"
     )
 
@@ -630,6 +633,55 @@ TASK:
 
 
 # =========================
+# Email helper
+# =========================
+
+def send_email(subject: str, body: str, to_email: str) -> None:
+    """
+    Изпраща имейл чрез SMTP. Ако няма конфигурация, просто тихо пропуска.
+    Очаквани env променливи:
+    - SMTP_HOST
+    - SMTP_PORT (по подразбиране 587)
+    - SMTP_USER
+    - SMTP_PASSWORD
+    - SMTP_FROM (по желание, иначе = SMTP_USER)
+    """
+    host = os.getenv("SMTP_HOST")
+    user = os.getenv("SMTP_USER")
+    password = os.getenv("SMTP_PASSWORD")
+    port_str = os.getenv("SMTP_PORT", "587")
+    from_email = os.getenv("SMTP_FROM") or user or to_email
+
+    if not host or not user or not password:
+        # няма конфигурация за SMTP – не хвърляме грешка, просто не пращаме имейл
+        return
+
+    try:
+        port = int(port_str)
+    except ValueError:
+        port = 587
+
+    msg = EmailMessage()
+    msg["Subject"] = subject
+    msg["From"] = from_email
+    msg["To"] = to_email
+    msg.set_content(body)
+
+    try:
+        with smtplib.SMTP(host, port, timeout=15) as server:
+            try:
+                server.starttls()
+            except Exception:
+                # ако сървърът не поддържа STARTTLS, опитваме без него
+                pass
+            server.login(user, password)
+            server.send_message(msg)
+    except Exception:
+        # не искаме да чупим бота, ако имейлът се счупи
+        return
+
+
+# =========================
 # FastAPI приложение
 # =========================
 
@@ -661,7 +713,8 @@ async def health():
 
 def save_appointment(business_id: str, json_str: str) -> None:
     """
-    Опитва да parse-не JSON-а след APPOINTMENT маркера и да го запише във файл appointments.log
+    Опитва да parse-не JSON-а след APPOINTMENT маркера и да го запише във файл appointments.log.
+    Освен това изпраща имейл до собственика, ако е конфигуриран APPOINTMENT_EMAIL_TO.
     """
     try:
         m = re.search(r"\{.*\}", json_str, re.DOTALL)
@@ -675,16 +728,67 @@ def save_appointment(business_id: str, json_str: str) -> None:
             **data,
         }
 
+        # Запис във файл
         with open("appointments.log", "a", encoding="utf-8") as f:
             f.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+        # Имейл до собственика (ако е настроен)
+        to_email = os.getenv("APPOINTMENT_EMAIL_TO")
+        if to_email:
+            lang = (data.get("language") or "").lower()
+            is_bg = lang.startswith("bg")
+
+            if is_bg:
+                subject = f"Нова заявка за среща от ChatVLT ({business_id})"
+                body_lines = [
+                    "Имате нова заявка за среща от ChatVLT.",
+                    "",
+                    f"Име: {data.get('name') or ''}",
+                    f"Фирма: {data.get('company') or ''}",
+                    f"Email: {data.get('email') or ''}",
+                    f"Телефон: {data.get('phone') or ''}",
+                    f"Локация: {data.get('location') or ''}",
+                    "",
+                    "Описание на проекта:",
+                    data.get("project_description") or "",
+                    "",
+                    f"Език на клиента: {data.get('language') or ''}",
+                    f"Business ID: {business_id}",
+                    "",
+                    f"Време (UTC): {record['timestamp_utc']}",
+                ]
+            else:
+                subject = f"New appointment request from ChatVLT ({business_id})"
+                body_lines = [
+                    "You have a new appointment request from ChatVLT.",
+                    "",
+                    f"Name: {data.get('name') or ''}",
+                    f"Company: {data.get('company') or ''}",
+                    f"Email: {data.get('email') or ''}",
+                    f"Phone: {data.get('phone') or ''}",
+                    f"Location: {data.get('location') or ''}",
+                    "",
+                    "Project description:",
+                    data.get("project_description") or "",
+                    "",
+                    f"Client language: {data.get('language') or ''}",
+                    f"Business ID: {business_id}",
+                    "",
+                    f"Time (UTC): {record['timestamp_utc']}",
+                ]
+
+            body = "\n".join(body_lines)
+            send_email(subject, body, to_email)
+
     except Exception:
-        pass
+        # не хвърляме грешка към клиента
+        return
 
 
 def save_contact_message(business_id: str, json_str: str) -> None:
     """
     Записва контактно съобщение във файл contact_messages.log.
-    По-късно тук може да добавим реално изпращане на имейл.
+    Освен това изпраща имейл до собственика, ако е конфигуриран CONTACT_EMAIL_TO.
     """
     try:
         m = re.search(r"\{.*\}", json_str, re.DOTALL)
@@ -698,10 +802,60 @@ def save_contact_message(business_id: str, json_str: str) -> None:
             **data,
         }
 
+        # Запис във файл
         with open("contact_messages.log", "a", encoding="utf-8") as f:
             f.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+        # Имейл до собственика (ако е настроен)
+        to_email = os.getenv("CONTACT_EMAIL_TO")
+        if to_email:
+            lang = (data.get("language") or "").lower()
+            is_bg = lang.startswith("bg")
+
+            if is_bg:
+                subject = f"Ново съобщение от ChatVLT ({business_id})"
+                body_lines = [
+                    "Имате ново контактно съобщение от ChatVLT.",
+                    "",
+                    f"Име: {data.get('name') or ''}",
+                    f"Email: {data.get('email') or ''}",
+                    f"Телефон: {data.get('phone') or ''}",
+                    "",
+                    f"Тема: {data.get('subject') or ''}",
+                    "",
+                    "Съобщение:",
+                    data.get("message") or "",
+                    "",
+                    f"Език на клиента: {data.get('language') or ''}",
+                    f"Business ID: {business_id}",
+                    "",
+                    f"Време (UTC): {record['timestamp_utc']}",
+                ]
+            else:
+                subject = f"New contact message from ChatVLT ({business_id})"
+                body_lines = [
+                    "You have a new contact message from ChatVLT.",
+                    "",
+                    f"Name: {data.get('name') or ''}",
+                    f"Email: {data.get('email') or ''}",
+                    f"Phone: {data.get('phone') or ''}",
+                    "",
+                    f"Subject: {data.get('subject') or ''}",
+                    "",
+                    "Message:",
+                    data.get("message") or "",
+                    "",
+                    f"Client language: {data.get('language') or ''}",
+                    f"Business ID: {business_id}",
+                    "",
+                    f"Time (UTC): {record['timestamp_utc']}",
+                ]
+
+            body = "\n".join(body_lines)
+            send_email(subject, body, to_email)
+
     except Exception:
-        pass
+        return
 
 
 def build_search_url(business_id: str, json_str: str) -> Optional[str]:
