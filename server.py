@@ -16,6 +16,14 @@ from math import sqrt
 
 import smtplib
 from email.message import EmailMessage
+import logging
+
+# =========================
+# Logging конфигурация
+# =========================
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("chatvlt")
 
 # =========================
 # OpenAI клиент
@@ -267,10 +275,8 @@ BUSINESSES = {
         "description_bg": BUSINESS_DESCRIPTION_BG,
         "tone_bg": "Професионален, спокоен, технически, но разбираем.",
         "tone_en": "Professional, calm and technical, but clear for non-technical people.",
-        # Примерен search шаблон (ако сайтът има search параметър ?s= )
         "search_url_template": "https://vltdatasolutions.com/?s={query}"
     }
-    # по-късно тук добавяме и магазини (гуми, техника и т.н.) с техните шаблони
 }
 
 APPOINTMENT_MARKER = "##APPOINTMENT##"
@@ -279,9 +285,6 @@ SEARCH_MARKER = "##SEARCH_LINK##"
 
 
 def _clean_text(text: str, max_length: int = 4000) -> str:
-    """
-    Премахва излишни whitespace и реже текста до разумна дължина за индексиране.
-    """
     if not text:
         return ""
     cleaned = " ".join(text.split())
@@ -289,9 +292,6 @@ def _clean_text(text: str, max_length: int = 4000) -> str:
 
 
 def _is_same_domain(base_url: str, other_url: str) -> bool:
-    """
-    Проверява дали other_url е на същия домейн като base_url.
-    """
     try:
         base = urlparse(base_url)
         other = urlparse(other_url)
@@ -301,13 +301,6 @@ def _is_same_domain(base_url: str, other_url: str) -> bool:
 
 
 def crawl_site(business_id: str) -> List[Dict[str, str]]:
-    """
-    Базов уеб crawler:
-    - обхожда до MAX_PAGES_PER_SITE страници;
-    - събира URL, title и текстово съдържание;
-    - работи само в домейна на зададения сайт.
-    Резултатът е списък от речници: {url, title, text}.
-    """
     biz = BUSINESSES.get(business_id, BUSINESSES["vlt_data"])
     base_url = biz.get("site_url")
     if not base_url:
@@ -333,10 +326,8 @@ def crawl_site(business_id: str) -> List[Dict[str, str]]:
                 continue
             soup = BeautifulSoup(resp.text, "html.parser")
 
-            # заглавие
             title = soup.title.string.strip() if soup.title and soup.title.string else url
 
-            # текст – без script/style
             for tag in soup(["script", "style", "noscript"]):
                 tag.decompose()
             text = soup.get_text(separator=" ", strip=True)
@@ -345,7 +336,6 @@ def crawl_site(business_id: str) -> List[Dict[str, str]]:
             if text:
                 pages.append({"url": url, "title": title, "text": text})
 
-            # линкове за следващо обхождане
             for a in soup.find_all("a", href=True):
                 href = a["href"].strip()
                 if not href:
@@ -367,9 +357,6 @@ def crawl_site(business_id: str) -> List[Dict[str, str]]:
 
 
 def embed_text(text: str) -> List[float]:
-    """
-    Създава embedding за подадения текст чрез OpenAI.
-    """
     if not text:
         return []
     try:
@@ -378,21 +365,12 @@ def embed_text(text: str) -> List[float]:
             input=[text],
         )
         return resp.data[0].embedding
-    except Exception:
+    except Exception as e:
+        logger.error(f"[EMBED] Error creating embedding: {e}")
         return []
 
 
 def build_site_index(business_id: str) -> List[Dict[str, object]]:
-    """
-    Създава или зарежда индекс за сайта на даден бизнес.
-    Индексът представлява списък от:
-    {
-        "url": str,
-        "title": str,
-        "text": str,
-        "embedding": List[float]
-    }
-    """
     index_filename = f"site_index_{business_id}.json"
     if os.path.exists(index_filename):
         try:
@@ -400,10 +378,9 @@ def build_site_index(business_id: str) -> List[Dict[str, object]]:
                 data = json.load(f)
                 if isinstance(data, list):
                     return data
-        except Exception:
-            pass
+        except Exception as e:
+            logger.error(f"[INDEX] Error reading index file: {e}")
 
-    # ако няма файл или е невалиден – crawl + embeddings
     pages = crawl_site(business_id)
     index: List[Dict[str, object]] = []
     for p in pages:
@@ -420,8 +397,8 @@ def build_site_index(business_id: str) -> List[Dict[str, object]]:
     try:
         with open(index_filename, "w", encoding="utf-8") as f:
             json.dump(index, f, ensure_ascii=False)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.error(f"[INDEX] Error writing index file: {e}")
 
     return index
 
@@ -438,10 +415,6 @@ def _cosine_similarity(a: List[float], b: List[float]) -> float:
 
 
 def find_relevant_pages(business_id: str, query: str, top_k: int = 3) -> List[Dict[str, str]]:
-    """
-    Намира най-подходящите страници от сайта за дадена заявка.
-    Връща списък от {url, title, text}.
-    """
     query = (query or "").strip()
     if not query:
         return []
@@ -474,9 +447,6 @@ def find_relevant_pages(business_id: str, query: str, top_k: int = 3) -> List[Di
 
 
 def build_site_context_message(business_id: str, user_query: str) -> Optional[str]:
-    """
-    Строи system-съобщение с контекст от сайта, което се подава към модела.
-    """
     pages = find_relevant_pages(business_id, user_query, top_k=3)
     if not pages:
         return None
@@ -637,23 +607,17 @@ TASK:
 # =========================
 
 def send_email(subject: str, body: str, to_email: str) -> None:
-    """
-    Изпраща имейл чрез SMTP. Ако няма конфигурация, просто тихо пропуска.
-    Очаквани env променливи:
-    - SMTP_HOST
-    - SMTP_PORT (по подразбиране 587)
-    - SMTP_USER
-    - SMTP_PASSWORD
-    - SMTP_FROM (по желание, иначе = SMTP_USER)
-    """
     host = os.getenv("SMTP_HOST")
     user = os.getenv("SMTP_USER")
     password = os.getenv("SMTP_PASSWORD")
     port_str = os.getenv("SMTP_PORT", "587")
     from_email = os.getenv("SMTP_FROM") or user or to_email
 
+    logger.info(f"[EMAIL] Preparing email to {to_email} with subject '{subject}'")
+    logger.info(f"[EMAIL] SMTP_HOST={host}, SMTP_USER={user}, SMTP_PORT={port_str}")
+
     if not host or not user or not password:
-        # няма конфигурация за SMTP – не хвърляме грешка, просто не пращаме имейл
+        logger.warning("[EMAIL] Missing SMTP configuration, email will NOT be sent.")
         return
 
     try:
@@ -671,14 +635,22 @@ def send_email(subject: str, body: str, to_email: str) -> None:
         with smtplib.SMTP(host, port, timeout=15) as server:
             try:
                 server.starttls()
-            except Exception:
-                # ако сървърът не поддържа STARTTLS, опитваме без него
-                pass
-            server.login(user, password)
-            server.send_message(msg)
-    except Exception:
-        # не искаме да чупим бота, ако имейлът се счупи
-        return
+                logger.info("[EMAIL] STARTTLS successful.")
+            except Exception as e:
+                logger.warning(f"[EMAIL] STARTTLS failed or not supported: {e}")
+            try:
+                server.login(user, password)
+                logger.info("[EMAIL] SMTP login successful.")
+            except Exception as e:
+                logger.error(f"[EMAIL] SMTP login failed: {e}")
+                return
+            try:
+                server.send_message(msg)
+                logger.info("[EMAIL] Email sent successfully.")
+            except Exception as e:
+                logger.error(f"[EMAIL] Sending email failed: {e}")
+    except Exception as e:
+        logger.error(f"[EMAIL] SMTP connection failed: {e}")
 
 
 # =========================
@@ -689,7 +661,7 @@ app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # по-късно може да го стесним към конкретни домейни
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -712,10 +684,6 @@ async def health():
 
 
 def save_appointment(business_id: str, json_str: str) -> None:
-    """
-    Опитва да parse-не JSON-а след APPOINTMENT маркера и да го запише във файл appointments.log.
-    Освен това изпраща имейл до собственика, ако е конфигуриран APPOINTMENT_EMAIL_TO.
-    """
     try:
         m = re.search(r"\{.*\}", json_str, re.DOTALL)
         if not m:
@@ -728,12 +696,12 @@ def save_appointment(business_id: str, json_str: str) -> None:
             **data,
         }
 
-        # Запис във файл
         with open("appointments.log", "a", encoding="utf-8") as f:
             f.write(json.dumps(record, ensure_ascii=False) + "\n")
 
-        # Имейл до собственика (ако е настроен)
         to_email = os.getenv("APPOINTMENT_EMAIL_TO")
+        logger.info(f"[APPOINTMENT] Saved appointment for business={business_id}, to_email={to_email}")
+
         if to_email:
             lang = (data.get("language") or "").lower()
             is_bg = lang.startswith("bg")
@@ -780,16 +748,11 @@ def save_appointment(business_id: str, json_str: str) -> None:
             body = "\n".join(body_lines)
             send_email(subject, body, to_email)
 
-    except Exception:
-        # не хвърляме грешка към клиента
-        return
+    except Exception as e:
+        logger.error(f"[APPOINTMENT] Error while saving/sending appointment: {e}")
 
 
 def save_contact_message(business_id: str, json_str: str) -> None:
-    """
-    Записва контактно съобщение във файл contact_messages.log.
-    Освен това изпраща имейл до собственика, ако е конфигуриран CONTACT_EMAIL_TO.
-    """
     try:
         m = re.search(r"\{.*\}", json_str, re.DOTALL)
         if not m:
@@ -802,12 +765,12 @@ def save_contact_message(business_id: str, json_str: str) -> None:
             **data,
         }
 
-        # Запис във файл
         with open("contact_messages.log", "a", encoding="utf-8") as f:
             f.write(json.dumps(record, ensure_ascii=False) + "\n")
 
-        # Имейл до собственика (ако е настроен)
         to_email = os.getenv("CONTACT_EMAIL_TO")
+        logger.info(f"[CONTACT] Saved contact message for business={business_id}, to_email={to_email}")
+
         if to_email:
             lang = (data.get("language") or "").lower()
             is_bg = lang.startswith("bg")
@@ -854,14 +817,11 @@ def save_contact_message(business_id: str, json_str: str) -> None:
             body = "\n".join(body_lines)
             send_email(subject, body, to_email)
 
-    except Exception:
-        return
+    except Exception as e:
+        logger.error(f"[CONTACT] Error while saving/sending contact message: {e}")
 
 
 def build_search_url(business_id: str, json_str: str) -> Optional[str]:
-    """
-    Прочита { "query": "..." } след SEARCH_MARKER и връща search URL според шаблона на бизнеса.
-    """
     try:
         m = re.search(r"\{.*\}", json_str, re.DOTALL)
         if not m:
@@ -881,12 +841,13 @@ def build_search_url(business_id: str, json_str: str) -> Optional[str]:
 
         encoded_query = quote_plus(query)
         return template.format(query=encoded_query)
-    except Exception:
+    except Exception as e:
+        logger.error(f"[SEARCH] Error while building search URL: {e}")
         return None
 
 
 # =========================
-# Основен /chat endpoint
+# /chat endpoint
 # =========================
 
 @app.post("/chat", response_model=ChatResponse)
@@ -897,7 +858,6 @@ async def chat(req: ChatRequest):
     business_id = req.business_id or "vlt_data"
     system_prompt = build_system_prompt(business_id)
 
-    # История на разговора
     messages = [{"role": "system", "content": system_prompt}]
 
     if req.history:
@@ -907,7 +867,6 @@ async def chat(req: ChatRequest):
             if role in ("user", "assistant") and content:
                 messages.append({"role": role, "content": content})
 
-    # Контекст от сайта (self-training за конкретния бизнес)
     site_context = build_site_context_message(business_id, req.message)
     if site_context:
         messages.append({"role": "system", "content": site_context})
@@ -924,30 +883,27 @@ async def chat(req: ChatRequest):
         raw_reply = completion.choices[0].message.content.strip()
         visible_reply = raw_reply
 
-        # 1) обработваме APPOINTMENT
         if APPOINTMENT_MARKER in visible_reply:
             before, after = visible_reply.split(APPOINTMENT_MARKER, 1)
             visible_reply = before.strip()
             save_appointment(business_id, after.strip())
 
-        # 2) обработваме CONTACT_MESSAGE
         if CONTACT_MARKER in visible_reply:
             before, after = visible_reply.split(CONTACT_MARKER, 1)
             visible_reply = before.strip()
             save_contact_message(business_id, after.strip())
 
-        # 3) обработваме SEARCH_LINK
         if SEARCH_MARKER in visible_reply:
             before, after = visible_reply.split(SEARCH_MARKER, 1)
             visible_reply = before.strip()
             url = build_search_url(business_id, after.strip())
             if url:
-                # добавяме линка в края на отговора
                 visible_reply = f"{visible_reply}\n\n👉 Линк: {url}"
 
         return ChatResponse(reply=visible_reply)
 
-    except Exception:
+    except Exception as e:
+        logger.error(f"[CHAT] Error while generating response: {e}")
         raise HTTPException(
             status_code=500,
             detail="Error while generating response from ChatVLT.",
