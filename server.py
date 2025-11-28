@@ -9,6 +9,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from openai import OpenAI
 
+import requests
+from bs4 import BeautifulSoup
+from urllib.parse import urljoin, urlparse
+from math import sqrt
+
 # =========================
 # OpenAI клиент
 # =========================
@@ -24,99 +29,226 @@ client = OpenAI(api_key=OPENAI_API_KEY)
 # =========================
 
 BUSINESS_DESCRIPTION_EN = """
-VLT DATA SOLUTIONS — Building the Backbone of the Digital World
+VLT DATA SOLUTIONS — Building the Backbone of Modern Data Centers Across Europe
 
-Who we are
-VLT DATA SOLUTIONS is a European engineering company specializing in the design, installation and maintenance of mission-critical data center infrastructure. Our field teams operate across Europe and deliver complete, certified infrastructure solutions—from structured cabling (fiber & copper), through rack and containment installation, to power distribution, grounding and final system certification — all built to comply with the most demanding reliability standards (Tier III / Tier IV).
+VLT DATA SOLUTIONS is a specialized engineering company focused on end-to-end data-center
+infrastructure deployment, structured cabling and critical IT environments. We operate across Europe
+and support enterprises, colocation providers, cloud platforms and telecom operators in building
+and maintaining reliable, high-performance data centers.
 
-We are a team of field engineers, network specialists and technicians dedicated to precision, reliability, safety and long-term performance. Every cable, every splice, patch, rack or power line we install is tested, labelled and documented to guarantee traceability and compliance.
+We combine hands-on field engineering expertise with strict adherence to international standards
+(TIA/EIA, ISO/IEC, EN, BICSI) and best practices for Tier III / Tier IV facilities.
 
-Our vision is to build and support the digital backbone of Europe — enabling organisations, cloud providers and data platforms to run smoothly, securely and efficiently. We stand for innovation, reliability and partnership: not just infrastructure, but trust.
+Who we are — Company Profile
 
-What we offer — Services & Competences
+VLT DATA SOLUTIONS brings together a team of field engineers, network specialists, project managers
+and technical experts with solid experience in:
+
+• Structured cabling (fiber & copper) for data centers and large campus environments
+• Rack & containment systems, cold/hot aisle, cable management and labeling
+• Power distribution, grounding and bonding, basic electrical works inside racks/rows
+• Testing, certification and troubleshooting (OTDR, Fluke DSX, other certifiers)
+• Migration, upgrade and expansion projects in live data-center environments
+• Ongoing maintenance, smart hands and on-site support for mission-critical systems
+
+We are based in Bulgaria and work across Europe, supporting local and international clients with
+deployments, upgrades and long-term service engagements.
+
+What we do — Services & Competences
 
 • Full Data-Center Infrastructure Deployment
-We design, build and deliver full data-center infrastructure — structured fiber and copper cabling, rack installation and organization, containment systems, power distribution and grounding. Our work covers from early planning and routing to final certification and documentation compliance (Tier III / IV).
+We design, install and certify complete data-center physical infrastructure — from incoming fiber
+and copper connectivity to structured cabling, racks, containment and patching. Our teams are
+trained to work in live environments with strict access rules, change windows and safety policies.
 
-• Structured Cabling (Fiber & Copper) & Network Installation
-Our teams perform fiber splicing, copper terminations, cable management, labelling, patching, and testing (OTDR for fiber; Fluke / DSX certification for copper). We guarantee certified, high-quality connectivity for mission-critical networks.
+Our scope can include:
+- Design and planning of the physical layer (cabling routes, rack layout, containment)
+- Fiber optic cabling, splicing, patch panels, trays and patch cords
+- Copper cabling (Cat6/Cat6A and above), termination, patch panels, cords
+- Racks, cabinets, PDUs, grounding and basic power connectivity
+- Labeling, documentation and as-built drawings
+- Final testing and certification with professional tools (OTDR, Fluke/DSX)
 
-• Rack & Containment Installation, Cable Management & Power Systems
-We deploy racks, cable containment, PDUs / power distribution systems, grounding and backup paths. We also take care of airflow planning, U-space balancing, and layout optimization for efficient maintenance and future scalability.
+• Structured Cabling (Fiber & Copper)
+We build structured cabling systems for data centers, telecom rooms, campus and office buildings.
+This includes backbones, horizontal cabling, MDA/HDA/EDA zones and interconnects between rows
+and rooms. We follow international standards and vendor recommendations to ensure long-term
+performance, scalability and reliability.
 
-• Testing, Certification & Documentation
-Every installation undergoes rigorous testing — network certification, grounding/bonding verification, redundancy and failover planning. All results are documented, labelled and handed over, ensuring compliance, traceability and long-term reliability.
+Our capabilities cover:
+- Fiber backbone deployment (single-mode and multi-mode)
+- High-density fiber panels, cassettes and pre-terminated solutions
+- Copper horizontal cabling, patching and cross-connects
+- MPO/MTP systems and high-speed links for modern data centers
+- Proper dressing, routing and separation of data and power
 
-• Consulting, Upgrade & Maintenance Services
-Whether you plan a new data-center build, an upgrade, relocation or infrastructure maintenance — we provide site surveys, capacity planning, route design, materials selection, installation and on-site maintenance. Our goal is to ensure infrastructure remains stable, scalable and efficient over time.
+• Rack & Containment, Cable Management, Power & Grounding
+We install and configure racks, cabinets and containment systems (cold/hot aisle), ensuring optimal
+airflow, maintainability and scalability. We take care of cable management (vertical / horizontal),
+overhead or underfloor routing, color-coding and labeling.
 
-• Scalable & Future-Proof Infrastructure
-We build with scalability, safety, redundancy and modular design in mind — so infrastructure can evolve with clients' needs. From dual-path cabling, redundant power, containment, expandability and maintenance-friendly layout — we deliver durable solutions for the long run.
+We also handle:
+- Basic power distribution inside the rack (PDUs, cabling to equipment)
+- Grounding and bonding of racks and metallic infrastructure
+- Physical security elements (doors, locks) where required
+
+• Testing, Certification & Troubleshooting
+Every installation undergoes rigorous testing and certification. We use professional tools such as
+OTDRs, Fluke/DSX and network testers to validate performance, attenuation, NEXT/PSNEXT and
+other parameters. We provide final reports that can be attached to infrastructure documentation
+and audits.
+
+We also help diagnose and fix problems in existing infrastructure:
+- Link failures, high attenuation or intermittent issues
+- Physical damage to fiber/copper runs
+- Re-labeling and documentation of legacy installations
+
+• Upgrades, Migrations & Ongoing Support
+Data centers evolve constantly. We support clients during:
+- Technology refresh (new switches, storage, servers)
+- Rack reconfiguration, re-cabling and capacity expansion
+- Relocation of equipment and rows
+- Migration windows with strict timing and rollback plans
+- Long-term maintenance and “smart hands” services
+
+We can act as your on-site field team for remote operations, performing routine checks, small
+tasks, visual inspections, equipment swaps and other activities that require presence in the data
+center.
 
 Our Core Principles: Vision, Mission & Values
 
 • Innovation:
-We bring modern engineering methods and state-of-the-art technologies (fiber optics, certified cabling, advanced power and containment solutions) to build data-centers ready for tomorrow’s demands.
+We adopt modern engineering practices, tools and structured approaches to deliver clean, scalable
+and audit-ready infrastructure. We are constantly improving our methods and workflows.
 
 • Reliability:
-Every connection and installation is built to last — tested, certified and documented following international standards. We guarantee uptime, safety and stability even under heavy load and critical conditions.
+We understand that data centers and core networks are mission-critical. We design and build with
+redundancy, safety and long-term reliability in mind.
 
 • Partnership:
-We work closely with our clients — transparent communication, professional execution and shared responsibility. Our success is measured by their long-term satisfaction and infrastructure performance.
+We see every project as a long-term partnership. We listen, advise and adapt to the client’s needs.
+We are transparent about risks, timelines and constraints and always aim to build trust.
 
-• Quality & Compliance:
-Compliance with Tier III / Tier IV standards, rigorous testing, documentation and safety procedures are fundamental. We don’t cut corners — everything is done with precision, traceability and accountability.
+Why work with VLT DATA SOLUTIONS
 
-Contact & Support
-If you are planning a new data-center build, upgrade, relocation or infrastructure optimization — our team is ready to assist. We operate across Europe and deliver infrastructure tailored to your workload, growth plans and reliability requirements.
+• Specialized in data-center and critical infrastructure projects
+• Hands-on field experience across multiple European countries
+• Adherence to Tier III / Tier IV design and implementation principles
+• Strong focus on documentation, labeling and testing
+• Flexible engagement models (project-based, long-term service, on-demand support)
+
+VLT DATA SOLUTIONS — we build and support the physical backbone of your digital infrastructure.
 """
 
 BUSINESS_DESCRIPTION_BG = """
-VLT DATA SOLUTIONS — Строим дигиталната основа на бъдещето
+VLT DATA SOLUTIONS — Гръбнакът на модерните дейта центрове в Европа
 
-Кои сме ние
-VLT DATA SOLUTIONS е европейска инженерна компания, специализирана в проектиране, изпълнение и поддръжка на критична инфраструктура за дата центрове. Нашите екипи оперират в цяла Европа и предоставят цялостни, сертифицирани решения — от структурно окабеляване (оптика и мед), през инсталация на шкафове (racks), containment, електрозахранване, заземяване и финална сертификация — всичко според най-високи изисквания за надеждност (Tier III / Tier IV).
+VLT DATA SOLUTIONS е специализирана инженерна компания, фокусирана върху изграждане на
+дейта център инфраструктура, структурно окабеляване и поддръжка на критични ИТ среди.
+Работим в цяла Европа и помагаме на предприятия, колокационни центрове, облачни платформи и
+телеком оператори да изграждат и поддържат надеждни, високопроизводителни дейта центрове.
 
-Ние сме екип от инженери, мрежови специалисти и техници, за които прецизността, безопасността и дългосрочната работа са основен приоритет. Всеки кабел, всяка връзка, всеки сплайс, шкаф или захранване се тества, етикетира и документира — за пълна проследимост и качество.
+Съчетаваме практически опит на терен с стриктно спазване на международни стандарти
+(TIA/EIA, ISO/IEC, EN, BICSI) и принципи за Tier III / Tier IV инфраструктура.
 
-Нашата визия е да изградим и поддържаме дигиталната „гръбнака“ на Европа — да дадем на организации, облачни доставчици и платформи инфраструктура, която работи гладко, сигурно и ефективно. Нашите ценности са: иновация, надеждност и партньорство — не просто инфраструктура, а дългосрочна сигурност и доверие.
+Кои сме ние — Профил на компанията
 
-Какво предлагаме — услуги и компетенции
+Екипът на VLT DATA SOLUTIONS включва полеви инженери, мрежови специалисти, проектни
+мениджъри и техници с богати знания и опит в:
 
-• Цялостно изграждане на дата-център инфраструктура
-Проектираме и изграждаме цялостна дата-център инфраструктура — структурно окабеляване (оптика и мед), монтаж на шкафове (racks), containment системи, разпределение на ток, заземяване. Покриваме целия процес — от планиране и маршрути, до финална сертификация и документация според Tier III / IV.
+• Структурно окабеляване (оптика и мед) за дейта центрове и големи кампуси
+• Rack & containment системи, cold/hot aisle, кабелен мениджмънт и етикетиране
+• Захранване, заземяване и основни електро дейности в рамките на IT инфраструктурата
+• Тестване, сертификация и диагностика (OTDR, Fluke DSX и др.)
+• Миграция, ъпгрейд и разширяване на действащи дейта центрове
+• Дългосрочна поддръжка, smart hands и on-site услуги за критични системи
 
-• Структурно окабеляване и мрежова инсталация (fiber & copper)
-Нашите екипи извършват splice на оптични влакна, медно окабеляване, patchи, организация на кабели, етикетиране и тестване (OTDR за оптика; Fluke / DSX сертификация за мед), за да гарантираме високо качество и сигурност на мрежата.
+Базирани сме в България и работим в различни европейски държави, като подкрепяме местни и
+международни клиенти с изграждане, разширяване и поддръжка на физическа инфраструктура.
 
-• Монтаж на шкафове, containment, управление на кабели и захранване
-Инсталираме racks, containment, PDU / разпределение на ток, заземяване и резервни пътища. Планираме въздушен поток, баланс на пространството (U-space), оптимизация на layout за лесна поддръжка и скалируемост.
+Какво правим — Услуги и компетенции
 
-• Тестване, сертификация и документация
-Всяка инсталация преминава през строг тестинг — сертификация на мрежата, проверка на заземяване и връзки, планове за резервираност и failover. Всичко се документира, етикетира и се предава на клиента, гарантирайки устойчивост, проследимост и качество.
+• Пълно изграждане на дейта център инфраструктура
+Проектираме, инсталираме и сертифицираме физическата инфраструктура на дейта центрове —
+от входящи оптични и медни връзки, през структурно окабеляване, до шкафове, containment,
+patch панели и кабелен мениджмънт.
 
-• Консултации, ъпгрейди и поддръжка
-Ако планирате нов проект, ъпгрейд на съществуваща инфраструктура, преместване или поддръжка — ние предлагаме огледи, проектиране, материали, инсталация и onsite поддръжка. Нашата цел е инфраструктурата да бъде стабилна, скалируема и ефективна през целия ѝ живот.
+Нашият обхват включва:
+- Проектиране и планиране на физическия слой (маршрути на кабели, layout на шкафове и редове)
+- Оптично окабеляване, сплайсване, patch панели, trays, patch cords
+- Медно окабеляване (Cat6/Cat6A и нагоре), терминaции, patch панели, cords
+- Инсталация на racks, cabinets, PDUs, заземяване и базово захранване
+- Етикетиране, документация и as-built чертежи
+- Финално тестване и сертификация с професионални уреди (OTDR, Fluke/DSX)
 
-• Скалируема и бъдеща инфраструктура
-Проектираме така, че инфраструктурата да расте с вашите нужди: двойни пътища (dual-path), резервираност, modularни системи, резервни захранвания, containment и layout, които позволяват лесна поддръжка, ъпгрейди и експанзия.
+• Структурно окабеляване (оптика и мед)
+Изграждаме структурни кабелни системи за дейта центрове, телекомуникационни помещения,
+офис сгради и кампуси — включително backbone, хоризонтално окабеляване, MDA/HDA/EDA
+зони и междуредови връзки.
 
-Нашите принципи — визия, мисия и ценности
+Обхватът включва:
+- Оптични backbone линкове (single-mode и multi-mode)
+- High-density оптични панели, касети и pre-terminated решения
+- Медно хоризонтално окабеляване и cross-connect решения
+- MPO/MTP системи за високоскоростни дейта център среди
+- Коректно разделяне и маршрутизиране на data и power
+
+• Rack & Containment, кабелен мениджмънт, захранване и заземяване
+Инсталираме и конфигурираме шкафове, cabinets и containment системи (cold/hot aisle), така че
+да осигурим добър въздушен поток, лесна поддръжка и скалируемост. Грижим се за кабелния
+мениджмънт (вертикален/хоризонтален), overhead или raised floor решения, color-coding,
+labeling и достъпност.
+
+Също така:
+- Изграждаме базово захранване в рамките на шкафа (PDUs, кабели към оборудване)
+- Осигуряваме заземяване и свързване на металните елементи
+- Можем да интегрираме базови физически защити (ключалки, врати) при нужда
+
+• Тестване, сертификация и диагностика
+Всяка инсталация преминава през стриктно тестване и сертификация. Използваме професионални
+уреди като OTDR, Fluke/DSX и други тестери, за да проверим затихване, параметри като NEXT,
+PSNEXT и други. Предоставяме финални отчети, които могат да бъдат прикачени към
+документация, одити и compliance изисквания.
+
+Също така помагаме при проблеми в съществуваща инфраструктура:
+- Линкове с високо затихване, периодични прекъсвания или пълни откази
+- Физически повреди по оптични/медни трасета
+- Преетикетиране и документално подреждане на legacy инсталации
+
+• Ъпгрейди, миграции и дългосрочна поддръжка
+Инфраструктурата в дейта центровете се развива постоянно. Подкрепяме клиенти при:
+- Технологичен refresh (нови суичове, storage, сървъри)
+- Реорганизация на шкафове, recabling и увеличаване на капацитета
+- Преместване на оборудване и цели редове
+- Миграционни прозорци с точни графици и rollback планове
+- Дългосрочни договори за поддръжка и „smart hands“ услуги
+
+Можем да бъдем вашият on-site екип за редовни проверки, малки задачи, инспекции, смяна на
+оборудване и други дейности, изискващи физическо присъствие в дейта центъра.
+
+Нашите принципи: Визия, мисия и ценности
 
 • Иновация:
-Прилагаме модерни инженерни практики и технологии — оптични влакна, сертифицирани кабели, съвременни power & containment решения — за да изградим дата-центрове, подготвени за бъдещите изисквания.
+Прилагаме модерни инженерни практики, инструменти и структуриран подход при изграждането
+на инфраструктура. Винаги се стремим да подобряваме процесите и методите си.
 
 • Надеждност:
-Всеки детайл е изграден и тестван с прецизност — сертифицирани стандарти, документи, тестове. Гарантираме стабилност, безопасност и непрекъснато функциониране дори при тежки натоварвания.
+Разбираме критичността на дейта центровете и мрежите. Проектираме и изграждаме с фокус върху
+резервираност, сигурност и дългосрочна стабилност.
 
 • Партньорство:
-Работим в тясно сътрудничество с клиентите — открита комуникация, професионално изпълнение и споделена отговорност. Вашият успех е наша задача.
+Всяко сътрудничество за нас е дългосрочен партньорски ангажимент. Слушаме, консултираме,
+споделяме рискове и винаги се стремим да изграждаме доверие.
 
-• Качество и съответствие:
-Спазваме международни стандарти (Tier III / Tier IV), провеждаме строг тестинг, документация и спазване на безопасност и проследимост. Без компромиси.
+Защо VLT DATA SOLUTIONS
 
-Контакти и подкрепа
-Ако планирате нов build, ъпгрейд, миграция или оптимизация на дата-център — нашият екип е готов да помогне. Работим в цяла Европа и предоставяме инфраструктура, съобразена с вашите натоварвания, планове за растеж и изисквания за надеждност.
+• Специализация в дейта център и критична инфраструктура
+• Практически опит в множество европейски държави
+• Принципи на Tier III / Tier IV при дизайн и реализация
+• Силен фокус върху документация, етикетиране и тестване
+• Гъвкави модели на работа (по проект, дългосрочни услуги, on-demand)
+
+VLT DATA SOLUTIONS — ние изграждаме и поддържаме физическия гръбнак на вашата дигитална инфраструктура.
 """
 
 # =========================
@@ -126,6 +258,7 @@ VLT DATA SOLUTIONS е европейска инженерна компания, 
 BUSINESSES = {
     "vlt_data": {
         "name": "VLT DATA SOLUTIONS",
+        "site_url": "https://vltdatasolutions.com",
         "languages": ["bg", "en"],
         "description_en": BUSINESS_DESCRIPTION_EN,
         "description_bg": BUSINESS_DESCRIPTION_BG,
@@ -138,8 +271,233 @@ BUSINESSES = {
 }
 
 APPOINTMENT_MARKER = "##APPOINTMENT##"
-SEARCH_MARKER = "##SEARCH_LINK##"
 CONTACT_MARKER = "##CONTACT_MESSAGE##"
+SEARCH_MARKER = "##SEARCH_LINK##"
+
+
+def _clean_text(text: str, max_length: int = 4000) -> str:
+    """
+    Премахва излишни whitespace и реже текста до разумна дължина за индексиране.
+    """
+    if not text:
+        return ""
+    cleaned = " ".join(text.split())
+    return cleaned[:max_length]
+
+
+def _is_same_domain(base_url: str, other_url: str) -> bool:
+    """
+    Проверява дали other_url е на същия домейн като base_url.
+    """
+    try:
+        base = urlparse(base_url)
+        other = urlparse(other_url)
+        return base.netloc == other.netloc
+    except Exception:
+        return False
+
+
+def crawl_site(business_id: str) -> List[Dict[str, str]]:
+    """
+    Базов уеб crawler:
+    - обхожда до MAX_PAGES_PER_SITE страници;
+    - събира URL, title и текстово съдържание;
+    - работи само в домейна на зададения сайт.
+    Резултатът е списък от речници: {url, title, text}.
+    """
+    biz = BUSINESSES.get(business_id, BUSINESSES["vlt_data"])
+    base_url = biz.get("site_url")
+    if not base_url:
+        return []
+
+    max_pages = int(os.getenv("MAX_PAGES_PER_SITE", "40"))
+
+    visited = set()
+    to_visit = [base_url]
+    pages: List[Dict[str, str]] = []
+
+    headers = {"User-Agent": "ChatVLT-Bot/1.0"}
+
+    while to_visit and len(pages) < max_pages:
+        url = to_visit.pop(0)
+        if url in visited:
+            continue
+        visited.add(url)
+
+        try:
+            resp = requests.get(url, headers=headers, timeout=10)
+            if "text/html" not in resp.headers.get("Content-Type", ""):
+                continue
+            soup = BeautifulSoup(resp.text, "html.parser")
+
+            # заглавие
+            title = soup.title.string.strip() if soup.title and soup.title.string else url
+
+            # текст – без script/style
+            for tag in soup(["script", "style", "noscript"]):
+                tag.decompose()
+            text = soup.get_text(separator=" ", strip=True)
+            text = _clean_text(text)
+
+            if text:
+                pages.append({"url": url, "title": title, "text": text})
+
+            # линкове за следващо обхождане
+            for a in soup.find_all("a", href=True):
+                href = a["href"].strip()
+                if not href:
+                    continue
+                full = urljoin(url, href)
+                if "#" in full:
+                    full = full.split("#", 1)[0]
+                if full in visited or full in to_visit:
+                    continue
+                if not _is_same_domain(base_url, full):
+                    continue
+                if any(full.lower().endswith(ext) for ext in [".jpg", ".jpeg", ".png", ".gif", ".pdf", ".zip", ".rar"]):
+                    continue
+                to_visit.append(full)
+        except Exception:
+            continue
+
+    return pages
+
+
+def embed_text(text: str) -> List[float]:
+    """
+    Създава embedding за подадения текст чрез OpenAI.
+    """
+    if not text:
+        return []
+    try:
+        resp = client.embeddings.create(
+            model="text-embedding-3-large",
+            input=[text],
+        )
+        return resp.data[0].embedding
+    except Exception:
+        return []
+
+
+def build_site_index(business_id: str) -> List[Dict[str, object]]:
+    """
+    Създава или зарежда индекс за сайта на даден бизнес.
+    Индексът представлява списък от:
+    {
+        "url": str,
+        "title": str,
+        "text": str,
+        "embedding": List[float]
+    }
+    """
+    index_filename = f"site_index_{business_id}.json"
+    if os.path.exists(index_filename):
+        try:
+            with open(index_filename, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                if isinstance(data, list):
+                    return data
+        except Exception:
+            pass
+
+    # ако няма файл или е невалиден – crawl + embeddings
+    pages = crawl_site(business_id)
+    index: List[Dict[str, object]] = []
+    for p in pages:
+        emb = embed_text(p["text"])
+        index.append(
+            {
+                "url": p["url"],
+                "title": p["title"],
+                "text": p["text"],
+                "embedding": emb,
+            }
+        )
+
+    try:
+        with open(index_filename, "w", encoding="utf-8") as f:
+            json.dump(index, f, ensure_ascii=False)
+    except Exception:
+        pass
+
+    return index
+
+
+def _cosine_similarity(a: List[float], b: List[float]) -> float:
+    if not a or not b or len(a) != len(b):
+        return 0.0
+    dot = sum(x * y for x, y in zip(a, b))
+    na = sqrt(sum(x * x for x in a))
+    nb = sqrt(sum(y * y for y in b))
+    if na == 0 or nb == 0:
+        return 0.0
+    return dot / (na * nb)
+
+
+def find_relevant_pages(business_id: str, query: str, top_k: int = 3) -> List[Dict[str, str]]:
+    """
+    Намира най-подходящите страници от сайта за дадена заявка.
+    Връща списък от {url, title, text}.
+    """
+    query = (query or "").strip()
+    if not query:
+        return []
+
+    index = build_site_index(business_id)
+    if not index:
+        return []
+
+    q_emb = embed_text(query)
+    if not q_emb:
+        return []
+
+    scored = []
+    for item in index:
+        emb = item.get("embedding") or []
+        sim = _cosine_similarity(q_emb, emb)
+        if sim > 0:
+            scored.append((sim, item))
+
+    scored.sort(key=lambda x: x[0], reverse=True)
+    top_items = [it for _, it in scored[:top_k]]
+    return [
+        {
+            "url": it["url"],
+            "title": it.get("title", it["url"]),
+            "text": it.get("text", ""),
+        }
+        for it in top_items
+    ]
+
+
+def build_site_context_message(business_id: str, user_query: str) -> Optional[str]:
+    """
+    Строи system-съобщение с контекст от сайта, което се подава към модела.
+    """
+    pages = find_relevant_pages(business_id, user_query, top_k=3)
+    if not pages:
+        return None
+
+    parts = []
+    for p in pages:
+        snippet = p["text"][:800]
+        parts.append(
+            f"URL: {p['url']}\\nTITLE: {p['title']}\\nCONTENT SNIPPET:\\n{snippet}"
+        )
+
+    joined = "\\n\\n---\\n\\n".join(parts)
+    return (
+        "The following is trusted content taken directly from the official website "
+        f"of {BUSINESSES.get(business_id, BUSINESSES['vlt_data'])['name']}."
+        "\\nUse it as an additional source of truth for:"
+        "\\n- product information (names, categories, sizes, models)"
+        "\\n- contact details (phone, email, address, working hours)"
+        "\\n- services, managers and team roles"
+        "\\n- descriptions of pages, sections and policies"
+        "\\n\\nALWAYS include clickable links (the URLs below) in your answer when helpful."
+        "\\n\\n"
+        f"{joined}"
+    )
 
 
 def build_system_prompt(business_id: str) -> str:
@@ -207,8 +565,8 @@ APPOINTMENTS / LEADS (PROJECTS, OFFERS):
 
   you MUST:
   1) stop asking for more details,
-  2) thank the user and confirm that the {biz['name']} team will contact them,
-  3) append at the very end of your answer a single line in the following format:
+  2) thank the user and confirm that the {biz['name']} team will review the information,
+  3) append at the end of your answer a single line in the format:
 
   {APPOINTMENT_MARKER} {{
     "name": "...",
@@ -217,48 +575,21 @@ APPOINTMENTS / LEADS (PROJECTS, OFFERS):
     "phone": "...",
     "location": "...",
     "project_description": "...",
-    "preferred_contact": "...",
     "language": "bg or en"
   }}
 
-- The JSON must be valid and on a single line. Keys are ALWAYS in English.
-- Do NOT explain this JSON to the user and do NOT mention that you are creating an appointment.
-- In your visible answer, just confirm that the {biz['name']} team will contact them and optionally
-  summarise the key project details you understood.
+- The JSON must be:
+  * valid,
+  * single-line,
+  * keys in English,
+  * and you must NOT mention this JSON in the visible answer.
 
-WEBSITE & LINK SEARCH (SEARCH_LINK):
-- Sometimes the user will look for something that can be answered best with a direct link
-  to a relevant page or search results on the website. Examples:
-  - "Покажи ми повече за data center услугите"
-  - "Искам да видя страница с проекти"
-  - For shops (in other businesses): "търся гуми 205/55 R16 Michelin", "търся пералня 8 кг Bosch"
-
-- When such intent is clear, you may both:
-  1) give a short helpful explanation,
-  2) and at the END of your answer add a single line in the format:
-
-  {SEARCH_MARKER} {{
-    "query": "user search text or extracted keywords",
-    "category": "optional category such as 'tires', 'electronics', 'services'"
-  }}
-
-- Do NOT put URLs directly inside this JSON. The backend will map this to a concrete URL
-  using the business configuration.
-- The JSON must be on a single line and valid.
-
-CONTACT MESSAGES TO THE COMPANY (CONTACT_MESSAGE):
-- If the user explicitly says that they want to send a message to the company, for example:
-  - "Имам запитване"
-  - "Искам да изпратя съобщение към фирмата"
-  - "Може ли да пратя имейл до вас през чата?"
-
-  then you should:
-  - Explain briefly that you can collect their message and forward it to the team.
-  - Ask for:
-    * name
-    * email
-    * phone (optional but recommended)
-    * subject (short title)
+CONTACT MESSAGES (GENERAL QUESTIONS / SUPPORT):
+- If the user just wants to "send a message", "ask a question" or "write to the team",
+  you should collect:
+    * name,
+    * email,
+    * short subject (1 line),
     * message body (their question / request)
 
 - Once you have at least name + email + message text,
@@ -275,6 +606,19 @@ CONTACT MESSAGES TO THE COMPANY (CONTACT_MESSAGE):
 
 - Again, the JSON must be on a single line, valid, keys in English, and you must NOT mention
   this JSON in the visible answer. Just confirm that the {biz['name']} team will receive the message.
+
+SEARCH LINK HANDLING:
+- If the user asks you to "search the site", "show more information from the website",
+  "find products/services on the company's site" or similar, you should:
+  1) Keep answering normally in natural language.
+  2) At the very end, add ONE line with the format:
+
+     {SEARCH_MARKER} {{
+       "query": "keywords in English or Bulgarian describing what to search"
+     }}
+
+- The "query" should be short but meaningful (e.g. "rack & containment", "fiber cabling", "optical links").
+- DO NOT explain this JSON in your answer. It is only for the backend to generate a search URL.
 
 TASK:
 - Answer only about data center infrastructure, services and capabilities of {biz['name']}.
@@ -312,12 +656,8 @@ class ChatResponse(BaseModel):
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "service": "chatvlt", "businesses": list(BUSINESSES.keys())}
+    return {"status": "ok", "service": "ChatVLT"}
 
-
-# =========================
-# Helpers за записи
-# =========================
 
 def save_appointment(business_id: str, json_str: str) -> None:
     """
@@ -360,18 +700,13 @@ def save_contact_message(business_id: str, json_str: str) -> None:
 
         with open("contact_messages.log", "a", encoding="utf-8") as f:
             f.write(json.dumps(record, ensure_ascii=False) + "\n")
-
-        # Тук по-късно може да добавим SMTP / имейл интеграция
-        # напр. използвайки os.getenv("CONTACT_EMAIL_TO") и т.н.
-
     except Exception:
         pass
 
 
 def build_search_url(business_id: str, json_str: str) -> Optional[str]:
     """
-    На база на SEARCH_LINK JSON-а + конфигурацията на бизнеса
-    връща конкретен URL към сайта (търсене/страница).
+    Прочита { "query": "..." } след SEARCH_MARKER и връща search URL според шаблона на бизнеса.
     """
     try:
         m = re.search(r"\{.*\}", json_str, re.DOTALL)
@@ -392,7 +727,6 @@ def build_search_url(business_id: str, json_str: str) -> Optional[str]:
 
         encoded_query = quote_plus(query)
         return template.format(query=encoded_query)
-
     except Exception:
         return None
 
@@ -418,6 +752,11 @@ async def chat(req: ChatRequest):
             content = m.get("content", "")
             if role in ("user", "assistant") and content:
                 messages.append({"role": role, "content": content})
+
+    # Контекст от сайта (self-training за конкретния бизнес)
+    site_context = build_site_context_message(business_id, req.message)
+    if site_context:
+        messages.append({"role": "system", "content": site_context})
 
     messages.append({"role": "user", "content": req.message})
 
