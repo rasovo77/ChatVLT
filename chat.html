@@ -1,511 +1,215 @@
 <!DOCTYPE html>
 <html lang="bg">
 <head>
-    <meta charset="UTF-8">
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>ChatVLT</title>
-    <style>
-        * {
-            box-sizing: border-box;
-        }
 
+    <style>
         body {
             margin: 0;
-            height: 100vh;
-            background: radial-gradient(circle at top left, #1d4ed8, #020617 50%, #000000);
-            font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-            color: #e5e7eb;
-            overflow: hidden;
-        }
-
-        .bg {
-            position: fixed;
-            inset: 0;
-            background:
-                radial-gradient(circle at 20% 20%, rgba(96,165,250,0.25), transparent 55%),
-                radial-gradient(circle at 80% 80%, rgba(45,212,191,0.16), transparent 55%);
-            pointer-events: none;
-        }
-
-        #chatShell {
-            position: fixed;
-            inset: 0;
-            display: flex;
-            align-items: center;
-            justify-content: flex-end;
-            padding: 32px;
-        }
-
-        @media (max-width: 768px) {
-            #chatShell {
-                padding: 8px;
-                justify-content: center;
-            }
-        }
-
-        .chat-window {
-            width: 360px;
-            max-width: 100%;
-            height: 560px;
-            max-height: 100%;
-            background: radial-gradient(circle at top left, #1f2937, #020617 70%);
-            border-radius: 24px;
-            box-shadow:
-                0 20px 35px rgba(15,23,42,0.75),
-                0 0 0 1px rgba(148,163,184,0.18);
-            display: flex;
-            flex-direction: column;
-            overflow: hidden;
-        }
-
-        .chat-header {
-            padding: 14px 18px 10px;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            border-bottom: 1px solid rgba(148,163,184,0.25);
-            background: linear-gradient(135deg, rgba(15,23,42,0.95), rgba(17,24,39,0.98));
-        }
-
-        .chat-header-left {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
-
-        .chat-logo {
-            width: 30px;
-            height: 30px;
-            border-radius: 10px;
-            background: radial-gradient(circle at 30% 30%, #38bdf8, #1d4ed8);
-            box-shadow: 0 0 16px rgba(56,189,248,0.7);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-weight: 800;
-            letter-spacing: 0.03em;
-            font-size: 16px;
-            color: #0b1120;
-        }
-
-        .chat-title-block {
-            display: flex;
-            flex-direction: column;
-        }
-
-        .chat-title {
-            font-size: 15px;
-            font-weight: 700;
-            letter-spacing: 0.04em;
-        }
-
-        .chat-subtitle {
-            font-size: 11px;
-            color: #9ca3af;
-        }
-
-        .chat-header-right {
-            display: flex;
-            align-items: center;
-            gap: 6px;
-        }
-
-        .header-btn {
-            width: 24px;
-            height: 24px;
-            border-radius: 999px;
-            border: none;
+            padding: 0;
             background: transparent;
-            color: #9ca3af;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            cursor: pointer;
-            font-size: 14px;
+            font-family: "Segoe UI", sans-serif;
         }
 
-        .header-btn:hover {
-            background: rgba(148,163,184,0.16);
-            color: #e5e7eb;
-        }
-
-        .chat-body {
-            flex: 1;
+        #chatContainer {
+            width: 380px;
+            height: 600px;
+            background: #0b1c2c;
+            border-radius: 15px;
             display: flex;
             flex-direction: column;
-            padding: 12px 14px;
-            gap: 10px;
-            overflow-y: auto;
+            box-shadow: 0 0 20px rgba(0,0,0,0.4);
+            overflow: hidden;
         }
 
-        .msg-row {
-            width: 100%;
+        /* Top bar */
+        #topBar {
+            background: #112944;
+            padding: 10px;
             display: flex;
+            justify-content: space-between;
+            align-items: center;
+            color: white;
+            font-size: 16px;
+            font-weight: bold;
+        }
+
+        .windowBtn {
+            cursor: pointer;
+            font-size: 20px;
+            padding: 0 8px;
+        }
+
+        /* Messages container */
+        #messages {
+            flex: 1;
+            padding: 15px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
         }
 
         .msg {
-            padding: 9px 12px;
-            margin: 2px 0;
-            border-radius: 14px;
             max-width: 80%;
-            font-size: 14px;
-            line-height: 1.35;
-            white-space: pre-wrap;       /* пази новите редове като абзаци */
-            word-wrap: break-word;       /* чупи дълги думи и линкове */
-            overflow-wrap: anywhere;     /* без хоризонтален скрол */
-        }
-
-        .msg a {
-            color: #60a5fa;
-            text-decoration: underline;
-            word-break: break-all;
-        }
-
-        .user {
-            margin-left: auto;
-            background: linear-gradient(135deg, #38bdf8, #2563eb);
-            color: #eff6ff;
-            border-bottom-right-radius: 4px;
+            padding: 10px 14px;
+            margin-bottom: 12px;
+            border-radius: 12px;
+            white-space: pre-line;
+            word-wrap: break-word;
+            line-height: 1.4;
         }
 
         .bot {
-            margin-right: auto;
-            background: rgba(15,23,42,0.9);
-            border: 1px solid rgba(55,65,81,0.9);
-            color: #e5e7eb;
-            border-bottom-left-radius: 4px;
+            background: #173b67;
+            align-self: flex-start;
+            color: white;
+            border-bottom-left-radius: 0;
         }
 
-        .typing {
-            opacity: 0.8;
-            font-size: 13px;
-            display: inline-flex;
-            align-items: center;
-            gap: 6px;
+        .me {
+            background: #0de36f;
+            align-self: flex-end;
+            color: black;
+            border-bottom-right-radius: 0;
         }
 
-        .typing-dot {
-            width: 6px;
-            height: 6px;
-            border-radius: 999px;
-            background: #9ca3af;
-            animation: blink 1s infinite ease-in-out;
-        }
-
-        .typing-dot:nth-child(2) {
-            animation-delay: 0.15s;
-        }
-
-        .typing-dot:nth-child(3) {
-            animation-delay: 0.3s;
-        }
-
-        @keyframes blink {
-            0%, 80%, 100% { opacity: 0.15; transform: translateY(0); }
-            40% { opacity: 0.9; transform: translateY(-1px); }
-        }
-
-        .chat-footer {
-            padding: 10px 12px 14px;
-            border-top: 1px solid rgba(31,41,55,0.9);
-            background: radial-gradient(circle at top, rgba(15,23,42,0.98), rgba(15,23,42,0.96));
+        /* Input area */
+        #inputArea {
             display: flex;
-            gap: 8px;
+            align-items: flex-end;
+            padding: 10px;
+            background: #0e1f36;
+            border-top: 1px solid #18314f;
         }
 
-        .input-shell {
+        #messageInput {
             flex: 1;
-            background: rgba(15,23,42,0.95);
-            border-radius: 999px;
-            border: 1px solid rgba(55,65,81,0.9);
-            padding: 7px 12px;
-            display: flex;
-            align-items: center;
-        }
-
-        #input {
-            flex: 1;
+            resize: none;
             border: none;
             outline: none;
-            background: transparent;
-            color: #e5e7eb;
-            font-size: 13px;
-        }
-
-        #input::placeholder {
-            color: #6b7280;
+            padding: 10px;
+            font-size: 16px;
+            border-radius: 10px;
+            background: #112944;
+            color: #ffffff;
+            max-height: 120px;
+            overflow-y: auto;
+            line-height: 1.4;
         }
 
         #sendBtn {
+            margin-left: 10px;
+            background: #0de36f;
             border: none;
-            border-radius: 999px;
-            padding: 7px 15px;
-            background: linear-gradient(135deg, #22c55e, #16a34a);
-            color: #ecfdf5;
-            font-size: 13px;
-            font-weight: 600;
+            color: white;
+            font-size: 20px;
+            padding: 10px 15px;
+            border-radius: 10px;
             cursor: pointer;
-            box-shadow: 0 0 0 1px rgba(22,163,74,0.5), 0 10px 25px rgba(22,163,74,0.45);
-            white-space: nowrap;
         }
 
-        #sendBtn:hover {
-            filter: brightness(1.06);
+        a {
+            color: #4ec7ff;
+            text-decoration: underline;
+            word-break: break-word;
         }
-
-        #sendBtn:active {
-            transform: translateY(1px);
-            box-shadow: 0 0 0 1px rgba(22,163,74,0.6), 0 4px 10px rgba(22,163,74,0.5);
-        }
-
-        /* Плаващ бутон */
-        #chatToggle {
-            position: fixed;
-            right: 28px;
-            bottom: 28px;
-            width: 150px;
-            height: 52px;
-            border-radius: 999px;
-            background: radial-gradient(circle at 20% 20%, #22d3ee, #2563eb 45%, #020617 100%);
-            border: none;
-            color: #e5e7eb;
-            font-weight: 800;
-            letter-spacing: 0.06em;
-            font-size: 15px;
-            text-shadow: 0 1px 2px rgba(15,23,42,0.9);
-            box-shadow:
-                0 0 25px rgba(59,130,246,0.9),
-                0 15px 35px rgba(15,23,42,0.9);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 6px;
-            cursor: pointer;
-            z-index: 50;
-        }
-
-        #chatToggle span.icon {
-            font-size: 16px;
-        }
-
-        #chatToggle::before {
-            content: "";
-            position: absolute;
-            inset: -3px;
-            border-radius: inherit;
-            border: 1px solid rgba(191,219,254,0.4);
-            opacity: 0;
-            transition: opacity 0.2s ease-out;
-        }
-
-        #chatToggle:hover::before {
-            opacity: 1;
-        }
-
-        #chatToggle:active {
-            transform: translateY(1px) scale(0.99);
-            box-shadow:
-                0 0 18px rgba(59,130,246,0.9),
-                0 10px 25px rgba(15,23,42,0.95);
-        }
-
-        #chatShell.hidden {
-            display: none;
-        }
-
     </style>
 </head>
+
 <body>
 
-<div class="bg"></div>
-
-<!-- Основен прозорец на чата -->
-<div id="chatShell" class="hidden">
-    <div class="chat-window">
-        <div class="chat-header">
-            <div class="chat-header-left">
-                <div class="chat-logo">V</div>
-                <div class="chat-title-block">
-                    <div class="chat-title">CHATVLT</div>
-                    <div class="chat-subtitle">AI асистент за твоя бизнес</div>
-                </div>
-            </div>
-            <div class="chat-header-right">
-                <button id="minBtn" class="header-btn">–</button>
-                <button id="closeBtn" class="header-btn">✕</button>
-            </div>
+<div id="chatContainer">
+    <div id="topBar">
+        <span>ChatVLT</span>
+        <div>
+            <span class="windowBtn" id="minBtn">—</span>
+            <span class="windowBtn" id="closeBtn">×</span>
         </div>
+    </div>
 
-        <div id="messages" class="chat-body"></div>
+    <div id="messages"></div>
 
-        <div class="chat-footer">
-            <div class="input-shell">
-                <input id="input" type="text" placeholder="Пиши съобщение..." />
-            </div>
-            <button id="sendBtn">Изпрати</button>
-        </div>
+    <div id="inputArea">
+        <textarea id="messageInput" placeholder="Напишете съобщение..." rows="1"></textarea>
+        <button id="sendBtn">➤</button>
     </div>
 </div>
 
-<!-- Плаващ бутон -->
-<button id="chatToggle">
-    <span class="icon">💬</span>
-    <span>CHATVLT</span>
-</button>
 
 <script>
-const API_URL = "https://chatvlt.onrender.com/chat";
+    const API_URL = "http://127.0.0.1:5500/chat"; // оставяме твоя URL
 
-let typingRow = null;
-let greeted = false;
-let history = [];
+    const msgBox = document.getElementById("messages");
+    const sendBtn = document.getElementById("sendBtn");
+    const messageInput = document.getElementById("messageInput");
 
-/* --------- формат на бот съобщението (линкове + абзаци) --------- */
-function formatBotMessage(text) {
-    let safe = text
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;");
-
-    const urlRegex = /(https?:\/\/[^\s]+)/g;
-    safe = safe.replace(urlRegex, (url) => {
-        return `<a href="${url}" target="_blank" rel="noopener noreferrer">${url}</a>`;
+    // Auto-resize textarea
+    messageInput.addEventListener("input", function () {
+        this.style.height = "auto";
+        this.style.height = this.scrollHeight + "px";
     });
 
-    return safe.replace(/\n/g, "<br>");
-}
-
-/* --------- добавяне на съобщение в чата + историята --------- */
-function addMessage(text, type) {
-    const row = document.createElement("div");
-    row.className = "msg-row";
-
-    const bubble = document.createElement("div");
-    bubble.className = "msg " + type;
-
-    if (type === "bot") {
-        bubble.innerHTML = formatBotMessage(text);
-        history.push({ role: "assistant", content: text });
-    } else {
-        bubble.textContent = text;
-        history.push({ role: "user", content: text });
-    }
-
-    // ограничаваме историята до последните 20 съобщения
-    if (history.length > 20) {
-        history = history.slice(history.length - 20);
-    }
-
-    row.appendChild(bubble);
-    document.getElementById("messages").appendChild(row);
-    bubble.scrollIntoView({ behavior: "smooth" });
-}
-
-/* --------- typing индикатор --------- */
-function showTyping() {
-    if (typingRow) return;
-
-    typingRow = document.createElement("div");
-    typingRow.className = "msg-row";
-
-    const bubble = document.createElement("div");
-    bubble.className = "msg bot typing";
-    bubble.innerHTML = `
-        <span class="typing-dot"></span>
-        <span class="typing-dot"></span>
-        <span class="typing-dot"></span>
-    `;
-
-    typingRow.appendChild(bubble);
-    document.getElementById("messages").appendChild(typingRow);
-    bubble.scrollIntoView({ behavior: "smooth" });
-}
-
-function hideTyping() {
-    if (!typingRow) return;
-    typingRow.remove();
-    typingRow = null;
-}
-
-/* --------- изпращане на съобщение към API --------- */
-async function sendMessage() {
-    const input = document.getElementById("input");
-    const text = input.value.trim();
-    if (!text) return;
-
-    addMessage(text, "user");
-    input.value = "";
-
-    showTyping();
-
-    try {
-        const response = await fetch(API_URL, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                message: text,
-                business_id: "vlt_data",
-                history: history
-            }),
-        });
-
-        const data = await response.json();
-        hideTyping();
-
-        if (data && data.reply) {
-            addMessage(data.reply, "bot");
-        } else {
-            addMessage("Неуспешен отговор от ChatVLT.", "bot");
+    // Enter (без Shift) → изпращане
+    messageInput.addEventListener("keydown", function(e) {
+        if (e.key === "Enter" && !e.shiftKey) {
+            e.preventDefault();
+            sendMessage();
         }
-    } catch (err) {
-        hideTyping();
-        addMessage("Грешка: не мога да се свържа с ChatVLT сървъра.", "bot");
-    }
-}
+    });
 
-/* --------- отваряне / затваряне на прозореца --------- */
-function openChat() {
-    document.getElementById("chatShell").classList.remove("hidden");
-    document.getElementById("input").focus();
+    // Показване на съобщение
+    function addMessage(text, sender) {
+        const div = document.createElement("div");
+        div.classList.add("msg", sender);
 
-    if (!greeted) {
-        greeted = true;
-        addMessage(
-"Здравей! Аз съм ChatVLT – интелигентен асистент, който може да помага на клиенти, да отговаря вместо теб и да работи 24/7. Попитай ме нещо за услугите на VLT DATA SOLUTIONS или ми опиши твоя проект.",
-            "bot"
+        // автоматично превръщаме линковете в кликаеми <a>
+        let safe = text.replace(/(https?:\/\/[^\s]+)/g, url =>
+            `<a href="${url}" target="_blank">${url}</a>`
         );
+
+        div.innerHTML = safe;
+        msgBox.appendChild(div);
+        msgBox.scrollTop = msgBox.scrollHeight;
     }
-}
 
-function toggleChat() {
-    const shell = document.getElementById("chatShell");
-    if (shell.classList.contains("hidden")) {
-        openChat();
-    } else {
-        shell.classList.add("hidden");
+    // Изпращане
+    async function sendMessage() {
+        const text = messageInput.value.trim();
+        if (!text) return;
+
+        addMessage(text, "me");
+        messageInput.value = "";
+        messageInput.style.height = "auto";
+
+        try {
+            const res = await fetch(API_URL, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ message: text, business_id: "vlt_data" })
+            });
+
+            const data = await res.json();
+            addMessage(data.reply, "bot");
+
+        } catch (err) {
+            addMessage("⚠ Грешка при връзка със сървъра.", "bot");
+        }
     }
-}
 
-function notifyParentToClose() {
-    if (window.parent && window.parent !== window) {
-        window.parent.postMessage({ source: "ChatVLT", type: "close" }, "*");
-    } else {
-        document.getElementById("chatShell").classList.add("hidden");
+    sendBtn.onclick = sendMessage;
+
+    // Минимизиране и затваряне → комуникация към родителския сайт
+    function notifyParentToClose() {
+        window.parent.postMessage({ action: "closeChatVLT" }, "*");
     }
-}
-
-/* --------- събития --------- */
-document.getElementById("chatToggle").onclick = toggleChat;
-document.getElementById("sendBtn").onclick = sendMessage;
-
-document.getElementById("input").addEventListener("keypress", (e) => {
-    if (e.key === "Enter") {
-        e.preventDefault();
-        sendMessage();
+    function notifyParentToMinimize() {
+        window.parent.postMessage({ action: "minimizeChatVLT" }, "*");
     }
-});
 
-document.getElementById("closeBtn").onclick = notifyParentToClose;
-document.getElementById("minBtn").onclick = notifyParentToClose;
+    document.getElementById("closeBtn").onclick = notifyParentToClose;
+    document.getElementById("minBtn").onclick = notifyParentToMinimize;
 </script>
 
 </body>
