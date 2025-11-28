@@ -131,10 +131,15 @@ BUSINESSES = {
         "description_bg": BUSINESS_DESCRIPTION_BG,
         "tone_bg": "Професионален, спокоен, технически, но разбираем.",
         "tone_en": "Professional, calm and technical, but clear for non-technical people.",
+        # Примерен search шаблон (ако сайтът има search параметър ?s= )
+        "search_url_template": "https://vltdatasolutions.com/?s={query}"
     }
+    # по-късно тук добавяме и магазини (гуми, техника и т.н.) с техните шаблони
 }
 
 APPOINTMENT_MARKER = "##APPOINTMENT##"
+SEARCH_MARKER = "##SEARCH_LINK##"
+CONTACT_MARKER = "##CONTACT_MESSAGE##"
 
 
 def build_system_prompt(business_id: str) -> str:
@@ -165,15 +170,22 @@ STYLE:
 - If something is not mentioned in the description, say that you cannot be sure and recommend direct
   contact with the {biz['name']} team instead of inventing facts.
 
-HANDLING CLIENT COMPANY NAMES:
-- Very often, users will write messages like:
-  "My company is X", "We are company X", "Our company is called X".
-- In such cases, treat this as CLIENT INFORMATION for a potential project or lead.
-- DO NOT try to describe company X, DO NOT refuse the conversation just because it is not {biz['name']}.
-- You may say that you only have detailed information about {biz['name']},
-  but you should still accept their company name as part of their project details.
+COMPANY VS CLIENT DATA (VERY IMPORTANT):
+- You will often receive personal data from the user: their name, email, phone, company.
+- NEVER reuse any user-provided personal contact (email, phone, company) as official contact data
+  for {biz['name']}.
+- If the user asks for official contacts of {biz['name']} (phone, email, address) and such data is
+  not explicitly provided in the description above, you MUST say that they can find the official
+  contact details on the company's website (vltdatasolutions.com) or via the Contact page.
+- It is FORBIDDEN to present the user's email/phone as if it were the company's email/phone.
 
-APPOINTMENTS / LEADS:
+HANDLING CLIENT COMPANY NAMES:
+- When the user says: "My company is X", "We are company X", "Our company is called X",
+  treat this as CLIENT INFORMATION for a potential project or lead.
+- DO NOT try to describe company X, DO NOT refuse the conversation just because it is not {biz['name']}.
+- You only have detailed information about {biz['name']}.
+
+APPOINTMENTS / LEADS (PROJECTS, OFFERS):
 - If the user is clearly interested in a project, offer, quotation, on-site work, data center build,
   upgrade, migration or maintenance, you should gently collect contact details.
 
@@ -198,7 +210,7 @@ APPOINTMENTS / LEADS:
   2) thank the user and confirm that the {biz['name']} team will contact them,
   3) append at the very end of your answer a single line in the following format:
 
-  ##APPOINTMENT## {{
+  {APPOINTMENT_MARKER} {{
     "name": "...",
     "company": "...",
     "email": "...",
@@ -213,6 +225,56 @@ APPOINTMENTS / LEADS:
 - Do NOT explain this JSON to the user and do NOT mention that you are creating an appointment.
 - In your visible answer, just confirm that the {biz['name']} team will contact them and optionally
   summarise the key project details you understood.
+
+WEBSITE & LINK SEARCH (SEARCH_LINK):
+- Sometimes the user will look for something that can be answered best with a direct link
+  to a relevant page or search results on the website. Examples:
+  - "Покажи ми повече за data center услугите"
+  - "Искам да видя страница с проекти"
+  - For shops (in other businesses): "търся гуми 205/55 R16 Michelin", "търся пералня 8 кг Bosch"
+
+- When such intent is clear, you may both:
+  1) give a short helpful explanation,
+  2) and at the END of your answer add a single line in the format:
+
+  {SEARCH_MARKER} {{
+    "query": "user search text or extracted keywords",
+    "category": "optional category such as 'tires', 'electronics', 'services'"
+  }}
+
+- Do NOT put URLs directly inside this JSON. The backend will map this to a concrete URL
+  using the business configuration.
+- The JSON must be on a single line and valid.
+
+CONTACT MESSAGES TO THE COMPANY (CONTACT_MESSAGE):
+- If the user explicitly says that they want to send a message to the company, for example:
+  - "Имам запитване"
+  - "Искам да изпратя съобщение към фирмата"
+  - "Може ли да пратя имейл до вас през чата?"
+
+  then you should:
+  - Explain briefly that you can collect their message and forward it to the team.
+  - Ask for:
+    * name
+    * email
+    * phone (optional but recommended)
+    * subject (short title)
+    * message body (their question / request)
+
+- Once you have at least name + email + message text,
+  you MUST append at the end of your answer a single line in the format:
+
+  {CONTACT_MARKER} {{
+    "name": "...",
+    "email": "...",
+    "phone": "...",
+    "subject": "...",
+    "message": "...",
+    "language": "bg or en"
+  }}
+
+- Again, the JSON must be on a single line, valid, keys in English, and you must NOT mention
+  this JSON in the visible answer. Just confirm that the {biz['name']} team will receive the message.
 
 TASK:
 - Answer only about data center infrastructure, services and capabilities of {biz['name']}.
@@ -229,10 +291,9 @@ TASK:
 
 app = FastAPI()
 
-# CORS – отворено за тестове
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["*"],  # по-късно може да го стесним към конкретни домейни
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -242,7 +303,6 @@ app.add_middleware(
 class ChatRequest(BaseModel):
     message: str
     business_id: Optional[str] = "vlt_data"
-    # history е по избор – ще го ползваме, когато го добавим във фронтенда
     history: Optional[List[Dict[str, str]]] = None
 
 
@@ -255,7 +315,14 @@ async def health():
     return {"status": "ok", "service": "chatvlt", "businesses": list(BUSINESSES.keys())}
 
 
+# =========================
+# Helpers за записи
+# =========================
+
 def save_appointment(business_id: str, json_str: str) -> None:
+    """
+    Опитва да parse-не JSON-а след APPOINTMENT маркера и да го запише във файл appointments.log
+    """
     try:
         m = re.search(r"\{.*\}", json_str, re.DOTALL)
         if not m:
@@ -274,6 +341,66 @@ def save_appointment(business_id: str, json_str: str) -> None:
         pass
 
 
+def save_contact_message(business_id: str, json_str: str) -> None:
+    """
+    Записва контактно съобщение във файл contact_messages.log.
+    По-късно тук може да добавим реално изпращане на имейл.
+    """
+    try:
+        m = re.search(r"\{.*\}", json_str, re.DOTALL)
+        if not m:
+            return
+        data = json.loads(m.group(0))
+
+        record = {
+            "business_id": business_id,
+            "timestamp_utc": datetime.utcnow().isoformat() + "Z",
+            **data,
+        }
+
+        with open("contact_messages.log", "a", encoding="utf-8") as f:
+            f.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+        # Тук по-късно може да добавим SMTP / имейл интеграция
+        # напр. използвайки os.getenv("CONTACT_EMAIL_TO") и т.н.
+
+    except Exception:
+        pass
+
+
+def build_search_url(business_id: str, json_str: str) -> Optional[str]:
+    """
+    На база на SEARCH_LINK JSON-а + конфигурацията на бизнеса
+    връща конкретен URL към сайта (търсене/страница).
+    """
+    try:
+        m = re.search(r"\{.*\}", json_str, re.DOTALL)
+        if not m:
+            return None
+        data = json.loads(m.group(0))
+
+        query = data.get("query", "")
+        if not query:
+            return None
+
+        biz = BUSINESSES.get(business_id, BUSINESSES["vlt_data"])
+        template = biz.get("search_url_template")
+        if not template:
+            return None
+
+        from urllib.parse import quote_plus
+
+        encoded_query = quote_plus(query)
+        return template.format(query=encoded_query)
+
+    except Exception:
+        return None
+
+
+# =========================
+# Основен /chat endpoint
+# =========================
+
 @app.post("/chat", response_model=ChatResponse)
 async def chat(req: ChatRequest):
     if not req.message or not req.message.strip():
@@ -282,17 +409,16 @@ async def chat(req: ChatRequest):
     business_id = req.business_id or "vlt_data"
     system_prompt = build_system_prompt(business_id)
 
-    # строим history, ако е изпратен от фронтенда
+    # История на разговора
     messages = [{"role": "system", "content": system_prompt}]
 
     if req.history:
-        for m in req.history[-10:]:  # максимум последните 10 съобщения
+        for m in req.history[-10:]:
             role = m.get("role")
             content = m.get("content", "")
             if role in ("user", "assistant") and content:
                 messages.append({"role": role, "content": content})
 
-    # последното съобщение от потребителя
     messages.append({"role": "user", "content": req.message})
 
     try:
@@ -303,12 +429,28 @@ async def chat(req: ChatRequest):
         )
 
         raw_reply = completion.choices[0].message.content.strip()
-
         visible_reply = raw_reply
-        if APPOINTMENT_MARKER in raw_reply:
-            before, after = raw_reply.split(APPOINTMENT_MARKER, 1)
+
+        # 1) обработваме APPOINTMENT
+        if APPOINTMENT_MARKER in visible_reply:
+            before, after = visible_reply.split(APPOINTMENT_MARKER, 1)
             visible_reply = before.strip()
             save_appointment(business_id, after.strip())
+
+        # 2) обработваме CONTACT_MESSAGE
+        if CONTACT_MARKER in visible_reply:
+            before, after = visible_reply.split(CONTACT_MARKER, 1)
+            visible_reply = before.strip()
+            save_contact_message(business_id, after.strip())
+
+        # 3) обработваме SEARCH_LINK
+        if SEARCH_MARKER in visible_reply:
+            before, after = visible_reply.split(SEARCH_MARKER, 1)
+            visible_reply = before.strip()
+            url = build_search_url(business_id, after.strip())
+            if url:
+                # добавяме линка в края на отговора
+                visible_reply = f"{visible_reply}\n\n👉 Линк: {url}"
 
         return ChatResponse(reply=visible_reply)
 
