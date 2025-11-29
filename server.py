@@ -1,7 +1,7 @@
 import os
 import json
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional, List, Dict
 
 from fastapi import FastAPI, HTTPException
@@ -17,6 +17,9 @@ from math import sqrt
 import smtplib
 from email.message import EmailMessage
 import logging
+
+from google.oauth2 import service_account
+from googleapiclient.discovery import build
 
 # =========================
 # Logging конфигурация
@@ -34,6 +37,103 @@ if not OPENAI_API_KEY:
     raise RuntimeError("OPENAI_API_KEY environment variable is not set.")
 
 client = OpenAI(api_key=OPENAI_API_KEY)
+
+# =========================
+# Google Calendar конфигурация
+# =========================
+
+GCAL_SCOPES = ["https://www.googleapis.com/auth/calendar"]
+GCAL_CALENDAR_ID = os.getenv("GOOGLE_CALENDAR_ID")  # ще го настроим в Render
+
+def get_gcal_service():
+    """
+    Създава Google Calendar service от service account JSON.
+    Ако няма конфигурация, връща None и само логва предупреждение.
+    """
+    json_str = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON")
+    if not json_str:
+        logger.warning("[GCAL] GOOGLE_SERVICE_ACCOUNT_JSON is not set. Calendar integration disabled.")
+        return None
+
+    try:
+        info = json.loads(json_str)
+        creds = service_account.Credentials.from_service_account_info(info, scopes=GCAL_SCOPES)
+        service = build("calendar", "v3", credentials=creds)
+        return service
+    except Exception as e:
+        logger.error(f"[GCAL] Failed to create service account credentials: {e}")
+        return None
+
+def create_calendar_event_from_appointment(record: Dict[str, object]) -> None:
+    """
+    Създава събитие в Google Calendar от appointment запис.
+    """
+    if not GCAL_CALENDAR_ID:
+        logger.warning("[GCAL] GOOGLE_CALENDAR_ID is not set. Skipping calendar event.")
+        return
+
+    service = get_gcal_service()
+    if service is None:
+        return
+
+    name = record.get("name") or "Unknown"
+    company = record.get("company") or ""
+    email = record.get("email") or ""
+    phone = record.get("phone") or ""
+    location = record.get("location") or ""
+    project_description = record.get("project_description") or ""
+    language = record.get("language") or ""
+    business_id = record.get("business_id") or ""
+    timestamp_utc = record.get("timestamp_utc") or datetime.utcnow().isoformat() + "Z"
+
+    # Заглавие на събитието
+    if company:
+        summary = f"VLT DATA – {name} ({company})"
+    else:
+        summary = f"VLT DATA – {name}"
+
+    # Описание
+    description_lines = [
+        "New appointment request from ChatVLT.",
+        "",
+        f"Name: {name}",
+        f"Company: {company}",
+        f"Email: {email}",
+        f"Phone: {phone}",
+        f"Location: {location}",
+        "",
+        "Project description:",
+        project_description,
+        "",
+        f"Client language: {language}",
+        f"Business ID: {business_id}",
+        f"Created at (UTC): {timestamp_utc}",
+    ]
+    description = "\n".join(description_lines)
+
+    # Време: placeholder – 1 час след текущото време, продължителност 1 час
+    start_dt = datetime.utcnow() + timedelta(hours=1)
+    end_dt = start_dt + timedelta(hours=1)
+
+    event_body = {
+        "summary": summary,
+        "description": description,
+        "start": {
+            "dateTime": start_dt.isoformat() + "Z",  # UTC
+            "timeZone": "UTC",
+        },
+        "end": {
+            "dateTime": end_dt.isoformat() + "Z",
+            "timeZone": "UTC",
+        },
+    }
+
+    try:
+        event = service.events().insert(calendarId=GCAL_CALENDAR_ID, body=event_body).execute()
+        logger.info(f"[GCAL] Event created: {event.get('id')} for appointment {name}")
+    except Exception as e:
+        logger.error(f"[GCAL] Failed to create calendar event: {e}")
+
 
 # =========================
 # Описания на бизнеса (EN + BG)
@@ -411,7 +511,7 @@ def _cosine_similarity(a: List[float], b: List[float]) -> float:
     nb = sqrt(sum(y * y for y in b))
     if na == 0 or nb == 0:
         return 0.0
-    return dot / (na * nb)
+    return dot / nb / na
 
 
 def find_relevant_pages(business_id: str, query: str, top_k: int = 3) -> List[Dict[str, str]]:
@@ -747,6 +847,9 @@ def save_appointment(business_id: str, json_str: str) -> None:
 
             body = "\n".join(body_lines)
             send_email(subject, body, to_email)
+
+        # Google Calendar събитие
+        create_calendar_event_from_appointment(record)
 
     except Exception as e:
         logger.error(f"[APPOINTMENT] Error while saving/sending appointment: {e}")
