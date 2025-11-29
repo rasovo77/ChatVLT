@@ -1074,10 +1074,11 @@ def save_appointment(business_id: str, json_str: str) -> None:
         to_email = os.getenv("APPOINTMENT_EMAIL_TO")
         logger.info(f"[APPOINTMENT] Saved appointment for business={business_id}, to_email={to_email}")
 
-        if to_email:
-            lang = (data.get("language") or "").lower()
-            is_bg = lang.startswith("bg")
+        lang = (data.get("language") or "").lower()
+        is_bg = lang.startswith("bg")
 
+        # -------- Имейл към фирмата --------
+        if to_email:
             if is_bg:
                 subject = f"Нова заявка за среща от ChatVLT ({business_id})"
                 body_lines = [
@@ -1127,6 +1128,68 @@ def save_appointment(business_id: str, json_str: str) -> None:
             body = "\n".join(body_lines)
             send_email(subject, body, to_email)
 
+        # -------- Имейл потвърждение към клиента --------
+        client_email = (data.get("email") or "").strip()
+        if client_email:
+            if is_bg:
+                subject_c = "Потвърждение за заявка за среща с VLT DATA SOLUTIONS"
+                body_c_lines = [
+                    f"Здравейте, {data.get('name') or ''},",
+                    "",
+                    "Вашата заявка за среща е получена успешно.",
+                    "",
+                    "Обобщение:",
+                    f"- Име: {data.get('name') or ''}",
+                    f"- Фирма: {data.get('company') or ''}",
+                    f"- Локация: {data.get('location') or ''}",
+                    "",
+                    "Описание на проекта / причина за срещата:",
+                    data.get("project_description") or "",
+                    "",
+                ]
+                if data.get("appointment_time_text"):
+                    body_c_lines.append(f"Предпочитан час: {data.get('appointment_time_text')}")
+                body_c_lines.extend(
+                    [
+                        "",
+                        "Екипът на VLT DATA SOLUTIONS ще прегледа заявката и ще се свърже с вас за окончателно потвърждение на часа.",
+                        "",
+                        "Поздрави,",
+                        "VLT DATA SOLUTIONS",
+                    ]
+                )
+            else:
+                subject_c = "Appointment request received – VLT DATA SOLUTIONS"
+                body_c_lines = [
+                    f"Hello {data.get('name') or ''},",
+                    "",
+                    "Your appointment request has been received successfully.",
+                    "",
+                    "Summary:",
+                    f"- Name: {data.get('name') or ''}",
+                    f"- Company: {data.get('company') or ''}",
+                    f"- Location: {data.get('location') or ''}",
+                    "",
+                    "Project / appointment description:",
+                    data.get("project_description") or "",
+                    "",
+                ]
+                if data.get("appointment_time_text"):
+                    body_c_lines.append(f"Preferred time: {data.get('appointment_time_text')}")
+                body_c_lines.extend(
+                    [
+                        "",
+                        "The VLT DATA SOLUTIONS team will review your request and contact you to confirm the exact time.",
+                        "",
+                        "Best regards,",
+                        "VLT DATA SOLUTIONS",
+                    ]
+                )
+
+            body_c = "\n".join(body_c_lines)
+            send_email(subject_c, body_c, client_email)
+
+        # -------- Събитие в календара --------
         create_calendar_event_from_appointment(record)
 
     except Exception as e:
@@ -1248,16 +1311,24 @@ async def chat(req: ChatRequest):
             if role in ("user", "assistant") and content:
                 messages.append({"role": role, "content": content})
 
-    # 🔹 Ново: ако пита за свободни часове – добавяме наличността от календара
+    # 🔹 Свободни часове – когато потребителят иска среща или пита за availability
     msg_lower = req.message.lower()
     availability_keywords = [
         "свободни часове",
         "свободни слотове",
         "кога има свободни",
         "кога имате свободни",
-        "free slots",
+        "час за среща",
+        "запазя час",
+        "запиша час",
+        "запис за среща",
+        "искам час",
+        "искам среща",
+        "book an appointment",
+        "schedule a meeting",
         "available time",
         "available times",
+        "free slots",
         "free time for meeting",
     ]
     if any(k in msg_lower for k in availability_keywords):
