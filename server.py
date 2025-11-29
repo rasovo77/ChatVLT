@@ -20,6 +20,7 @@ import logging
 
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
+from zoneinfo import ZoneInfo
 
 # =========================
 # Logging конфигурация
@@ -44,6 +45,7 @@ client = OpenAI(api_key=OPENAI_API_KEY)
 
 GCAL_SCOPES = ["https://www.googleapis.com/auth/calendar"]
 GCAL_CALENDAR_ID = os.getenv("GOOGLE_CALENDAR_ID")  # "primary" или "vvtcamp@gmail.com"
+BUSINESS_TIMEZONE = os.getenv("BUSINESS_TIMEZONE", "Europe/Sofia")
 
 
 def get_gcal_service():
@@ -178,6 +180,169 @@ def create_calendar_event_from_appointment(record: Dict[str, object]) -> None:
         logger.info(f"[GCAL] Event created: {event.get('id')} for appointment {name}")
     except Exception as e:
         logger.error(f"[GCAL] Failed to create calendar event: {e}")
+
+
+# ===== Нови функции: четене на календар и свободни прозорци =====
+
+def get_calendar_events(days: int = 7) -> List[Dict[str, datetime]]:
+    """
+    Връща списък от събития за следващите 'days' дни:
+    [{ 'start': datetime, 'end': datetime, 'summary': str }]
+    Всички времена са в BUSINESS_TIMEZONE.
+    """
+    if not GCAL_CALENDAR_ID:
+        logger.warning("[GCAL] GOOGLE_CALENDAR_ID is not set. Skipping events fetch.")
+        return []
+
+    service = get_gcal_service()
+    if service is None:
+        return []
+
+    now_utc = datetime.now(timezone.utc)
+    time_min = now_utc.isoformat()
+    time_max = (now_utc + timedelta(days=days)).isoformat()
+
+    try:
+        events_result = (
+            service.events()
+            .list(
+                calendarId=GCAL_CALENDAR_ID,
+                timeMin=time_min,
+                timeMax=time_max,
+                singleEvents=True,
+                orderBy="startTime",
+            )
+            .execute()
+        )
+        items = events_result.get("items", [])
+    except Exception as e:
+        logger.error(f"[GCAL] Failed to list events: {e}")
+        return []
+
+    tz = ZoneInfo(BUSINESS_TIMEZONE)
+    events: List[Dict[str, datetime]] = []
+
+    for ev in items:
+        start_raw = ev.get("start", {}).get("dateTime") or ev.get("start", {}).get("date")
+        end_raw = ev.get("end", {}).get("dateTime") or ev.get("end", {}).get("date")
+        if not start_raw or not end_raw:
+            continue
+
+        try:
+            if "T" not in start_raw:
+                start_dt = datetime.fromisoformat(start_raw).replace(tzinfo=tz)
+                end_dt = datetime.fromisoformat(end_raw).replace(tzinfo=tz)
+            else:
+                start_dt = datetime.fromisoformat(start_raw)
+                end_dt = datetime.fromisoformat(end_raw)
+                if start_dt.tzinfo is None:
+                    start_dt = start_dt.replace(tzinfo=timezone.utc)
+                if end_dt.tzinfo is None:
+                    end_dt = end_dt.replace(tzinfo=timezone.utc)
+                start_dt = start_dt.astimezone(tz)
+                end_dt = end_dt.astimezone(tz)
+        except Exception:
+            continue
+
+        events.append(
+            {
+                "start": start_dt,
+                "end": end_dt,
+                "summary": ev.get("summary", ""),
+            }
+        )
+
+    return events
+
+
+def compute_free_windows(days: int = 5) -> List[Dict[str, datetime]]:
+    """
+    Изчислява свободни прозорци за следващите 'days' дни
+    в работно време 09:00–17:00 в BUSINESS_TIMEZONE.
+    Връща списък от {'start': dt, 'end': dt}.
+    """
+    tz = ZoneInfo(BUSINESS_TIMEZONE)
+    now_tz = datetime.now(timezone.utc).astimezone(tz)
+
+    busy_events = get_calendar_events(days)
+    free_windows: List[Dict[str, datetime]] = []
+
+    WORK_START_HOUR = 9
+    WORK_END_HOUR = 17
+
+    for i in range(days):
+        day = (now_tz + timedelta(days=i)).date()
+        day_start = datetime(day.year, day.month, day.day, WORK_START_HOUR, 0, tzinfo=tz)
+        day_end = datetime(day.year, day.month, day.day, WORK_END_HOUR, 0, tzinfo=tz)
+
+        if day_end <= now_tz:
+            continue
+
+        if i == 0 and now_tz > day_start:
+            day_start = now_tz
+
+        todays_busy = []
+        for ev in busy_events:
+            s = ev["start"]
+            e = ev["end"]
+            if e <= day_start or s >= day_end:
+                continue
+            if s < day_start:
+                s = day_start
+            if e > day_end:
+                e = day_end
+            todays_busy.append((s, e))
+
+        todays_busy.sort(key=lambda x: x[0])
+
+        current = day_start
+        for s, e in todays_busy:
+            if s > current:
+                free_windows.append({"start": current, "end": s})
+            if e > current:
+                current = e
+
+        if current < day_end:
+            free_windows.append({"start": current, "end": day_end})
+
+    return free_windows
+
+
+def get_free_windows_text(days: int = 5) -> Optional[str]:
+    """
+    Връща текстово описание на свободните интервали за следващите дни,
+    което се подава към модела.
+    """
+    try:
+        free_windows = compute_free_windows(days)
+    except Exception as e:
+        logger.error(f"[GCAL] Failed to compute free windows: {e}")
+        return None
+
+    if not free_windows:
+        return "There are no free time windows in the calendar in the next few days."
+
+    tz = ZoneInfo(BUSINESS_TIMEZONE)
+    lines: List[str] = []
+    current_date = None
+
+    for win in free_windows:
+        s: datetime = win["start"].astimezone(tz)
+        e: datetime = win["end"].astimezone(tz)
+        date_str = s.strftime("%d.%m.%Y (%A)")
+        time_range = f"{s.strftime('%H:%M')} – {e.strftime('%H:%M')}"
+
+        if current_date != date_str:
+            current_date = date_str
+            lines.append(f"{date_str}: {time_range}")
+        else:
+            lines[-1] += f", {time_range}"
+
+    header = (
+        "Here is the up-to-date availability from the Google Calendar "
+        f"for the next {days} days (timezone: {BUSINESS_TIMEZONE}):"
+    )
+    return header + "\n" + "\n".join(lines)
 
 
 # =========================
@@ -1082,6 +1247,28 @@ async def chat(req: ChatRequest):
             content = m.get("content", "")
             if role in ("user", "assistant") and content:
                 messages.append({"role": role, "content": content})
+
+    # 🔹 Ново: ако пита за свободни часове – добавяме наличността от календара
+    msg_lower = req.message.lower()
+    availability_keywords = [
+        "свободни часове",
+        "свободни слотове",
+        "кога има свободни",
+        "кога имате свободни",
+        "free slots",
+        "available time",
+        "available times",
+        "free time for meeting",
+    ]
+    if any(k in msg_lower for k in availability_keywords):
+        avail_text = get_free_windows_text(days=5)
+        if avail_text:
+            messages.append(
+                {
+                    "role": "system",
+                    "content": avail_text,
+                }
+            )
 
     site_context = build_site_context_message(business_id, req.message)
     if site_context:
