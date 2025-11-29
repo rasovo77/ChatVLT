@@ -43,7 +43,7 @@ client = OpenAI(api_key=OPENAI_API_KEY)
 # =========================
 
 GCAL_SCOPES = ["https://www.googleapis.com/auth/calendar"]
-GCAL_CALENDAR_ID = os.getenv("GOOGLE_CALENDAR_ID")  # ще го настроим в Render
+GCAL_CALENDAR_ID = os.getenv("GOOGLE_CALENDAR_ID")  # за MVP: primary
 
 def get_gcal_service():
     """
@@ -64,9 +64,29 @@ def get_gcal_service():
         logger.error(f"[GCAL] Failed to create service account credentials: {e}")
         return None
 
+def parse_iso_utc(dt_str: str) -> Optional[datetime]:
+    """
+    Приема ISO низ (с или без Z) и връща datetime в UTC.
+    """
+    if not dt_str:
+        return None
+    try:
+        # заменяме Z с +00:00, за да може fromisoformat да работи
+        if dt_str.endswith("Z"):
+            dt_str = dt_str[:-1] + "+00:00"
+        dt = datetime.fromisoformat(dt_str)
+        # ако е offset-aware – конверт в UTC, ако е naive – приемаме, че вече е UTC
+        if dt.tzinfo is not None:
+            return dt.astimezone(tz=datetime.utcfromtimestamp(0).tzinfo)  # фактически оставяме UTC
+        return dt
+    except Exception as e:
+        logger.error(f"[GCAL] Failed to parse appointment_time_utc '{dt_str}': {e}")
+        return None
+
 def create_calendar_event_from_appointment(record: Dict[str, object]) -> None:
     """
     Създава събитие в Google Calendar от appointment запис.
+    Използва appointment_time_utc, ако е подадено; иначе fallback към +1 час от сега.
     """
     if not GCAL_CALENDAR_ID:
         logger.warning("[GCAL] GOOGLE_CALENDAR_ID is not set. Skipping calendar event.")
@@ -85,6 +105,8 @@ def create_calendar_event_from_appointment(record: Dict[str, object]) -> None:
     language = record.get("language") or ""
     business_id = record.get("business_id") or ""
     timestamp_utc = record.get("timestamp_utc") or datetime.utcnow().isoformat() + "Z"
+    appointment_time_text = record.get("appointment_time_text") or ""
+    appointment_time_utc = record.get("appointment_time_utc") or ""
 
     # Заглавие на събитието
     if company:
@@ -105,21 +127,40 @@ def create_calendar_event_from_appointment(record: Dict[str, object]) -> None:
         "Project description:",
         project_description,
         "",
-        f"Client language: {language}",
-        f"Business ID: {business_id}",
-        f"Created at (UTC): {timestamp_utc}",
     ]
+
+    if appointment_time_text:
+        description_lines.append(f"Requested time (human text): {appointment_time_text}")
+    if appointment_time_utc:
+        description_lines.append(f"Requested time (UTC ISO): {appointment_time_utc}")
+
+    description_lines.extend(
+        [
+            "",
+            f"Client language: {language}",
+            f"Business ID: {business_id}",
+            f"Created at (UTC): {timestamp_utc}",
+        ]
+    )
+
     description = "\n".join(description_lines)
 
-    # Време: placeholder – 1 час след текущото време, продължителност 1 час
-    start_dt = datetime.utcnow() + timedelta(hours=1)
+    # Време на събитието
+    start_dt = None
+    if appointment_time_utc:
+        start_dt = parse_iso_utc(appointment_time_utc)
+
+    if start_dt is None:
+        # fallback – както досега: +1 час
+        start_dt = datetime.utcnow() + timedelta(hours=1)
+
     end_dt = start_dt + timedelta(hours=1)
 
     event_body = {
         "summary": summary,
         "description": description,
         "start": {
-            "dateTime": start_dt.isoformat() + "Z",  # UTC
+            "dateTime": start_dt.isoformat() + "Z",
             "timeZone": "UTC",
         },
         "end": {
@@ -616,9 +657,10 @@ HANDLING CLIENT COMPANY NAMES:
 - DO NOT try to describe company X, DO NOT refuse the conversation just because it is not {biz['name']}.
 - You only have detailed information about {biz['name']}.
 
-APPOINTMENTS / LEADS (PROJECTS, OFFERS):
+APPOINTMENTS / LEADS (PROJECTS, OFFERS, BOOKINGS):
 - If the user is clearly interested in a project, offer, quotation, on-site work, data center build,
-  upgrade, migration or maintenance, you should gently collect contact details.
+  upgrade, migration or maintenance, OR wants to book a specific date/time (like a consultation
+  or appointment), you should gently collect contact details.
 
 - Ask naturally (not as a rigid form) for:
   * full name
@@ -626,7 +668,21 @@ APPOINTMENTS / LEADS (PROJECTS, OFFERS):
   * email
   * phone (if possible)
   * country/city or site location
-  * short description of the project (scope, timelines, criticality)
+  * short description of the project or reason for the appointment
+  * preferred date and time for the appointment (ask explicitly!)
+
+- The preferred appointment time should be clarified in conversation, for example:
+  "next Monday at 15:00", "tomorrow morning around 10:30", "on 5 December at 14:30",
+  "Wednesday after 11:00", etc.
+
+- Once you understand the time, you MUST convert it to:
+  * appointment_time_text  – short human-readable description, in the user language
+    (for example: "понеделник, 15:30, часова зона Europe/Sofia")
+  * appointment_time_utc   – single ISO 8601 string in UTC, e.g. "2025-12-05T13:30:00Z"
+
+- When the user writes in Bulgarian and does not specify timezone, assume Europe/Sofia.
+- When the user writes in English and mentions a clear timezone, respect it; otherwise you may
+  assume Europe/Sofia if it makes sense (for Bulgarian context) or UTC if unclear.
 
 - Always keep track of what information you already have.
   If some details are missing, ASK ONLY FOR THE MISSING FIELDS, not for everything again.
@@ -634,11 +690,13 @@ APPOINTMENTS / LEADS (PROJECTS, OFFERS):
 - As soon as you have AT LEAST:
   * name
   * at least one contact (email OR phone)
-  * a short project description
+  * a short project/appointment description
+  * a clarified appointment time
 
   you MUST:
   1) stop asking for more details,
-  2) thank the user and confirm that the {biz['name']} team will review the information,
+  2) thank the user and confirm that the {biz['name']} team will review the information
+     and confirm the exact time by email/phone,
   3) append at the end of your answer a single line in the format:
 
   {APPOINTMENT_MARKER} {{
@@ -648,7 +706,9 @@ APPOINTMENTS / LEADS (PROJECTS, OFFERS):
     "phone": "...",
     "location": "...",
     "project_description": "...",
-    "language": "bg or en"
+    "language": "bg or en",
+    "appointment_time_text": "...",
+    "appointment_time_utc": "YYYY-MM-DDTHH:MM:SSZ"
   }}
 
 - The JSON must be:
@@ -817,13 +877,9 @@ def save_appointment(business_id: str, json_str: str) -> None:
                     f"Телефон: {data.get('phone') or ''}",
                     f"Локация: {data.get('location') or ''}",
                     "",
-                    "Описание на проекта:",
+                    "Описание на проекта / причина за среща:",
                     data.get("project_description") or "",
                     "",
-                    f"Език на клиента: {data.get('language') or ''}",
-                    f"Business ID: {business_id}",
-                    "",
-                    f"Време (UTC): {record['timestamp_utc']}",
                 ]
             else:
                 subject = f"New appointment request from ChatVLT ({business_id})"
@@ -836,14 +892,26 @@ def save_appointment(business_id: str, json_str: str) -> None:
                     f"Phone: {data.get('phone') or ''}",
                     f"Location: {data.get('location') or ''}",
                     "",
-                    "Project description:",
+                    "Project / appointment description:",
                     data.get("project_description") or "",
                     "",
-                    f"Client language: {data.get('language') or ''}",
+                ]
+
+            # информация за времето
+            if data.get("appointment_time_text"):
+                body_lines.append(f"Requested time (human text): {data.get('appointment_time_text')}")
+            if data.get("appointment_time_utc"):
+                body_lines.append(f"Requested time (UTC ISO): {data.get('appointment_time_utc')}")
+
+            body_lines.extend(
+                [
+                    "",
+                    f"Език на клиента / Client language: {data.get('language') or ''}",
                     f"Business ID: {business_id}",
                     "",
-                    f"Time (UTC): {record['timestamp_utc']}",
+                    f"Време (UTC): {record['timestamp_utc']}",
                 ]
+            )
 
             body = "\n".join(body_lines)
             send_email(subject, body, to_email)
