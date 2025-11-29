@@ -1,7 +1,7 @@
 import os
 import json
 import re
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional, List, Dict
 
 from fastapi import FastAPI, HTTPException
@@ -43,7 +43,8 @@ client = OpenAI(api_key=OPENAI_API_KEY)
 # =========================
 
 GCAL_SCOPES = ["https://www.googleapis.com/auth/calendar"]
-GCAL_CALENDAR_ID = os.getenv("GOOGLE_CALENDAR_ID")  # за MVP: primary
+GCAL_CALENDAR_ID = os.getenv("GOOGLE_CALENDAR_ID")  # напр. "primary" или "vvtcamp@gmail.com"
+
 
 def get_gcal_service():
     """
@@ -64,24 +65,29 @@ def get_gcal_service():
         logger.error(f"[GCAL] Failed to create service account credentials: {e}")
         return None
 
+
 def parse_iso_utc(dt_str: str) -> Optional[datetime]:
     """
-    Приема ISO низ (с или без Z) и връща datetime в UTC.
+    Приема ISO низ (с или без Z) и връща timezone-aware datetime в UTC.
     """
     if not dt_str:
         return None
     try:
-        # заменяме Z с +00:00, за да може fromisoformat да работи
+        # Заменяме Z с +00:00, за да може fromisoformat да работи
         if dt_str.endswith("Z"):
             dt_str = dt_str[:-1] + "+00:00"
         dt = datetime.fromisoformat(dt_str)
-        # ако е offset-aware – конверт в UTC, ако е naive – приемаме, че вече е UTC
+
+        # Ако има timezone, конвертираме към UTC
         if dt.tzinfo is not None:
-            return dt.astimezone(tz=datetime.utcfromtimestamp(0).tzinfo)  # фактически оставяме UTC
-        return dt
+            return dt.astimezone(timezone.utc)
+
+        # Ако е naive – приемаме, че вече е в UTC и го маркираме като такъв
+        return dt.replace(tzinfo=timezone.utc)
     except Exception as e:
         logger.error(f"[GCAL] Failed to parse appointment_time_utc '{dt_str}': {e}")
         return None
+
 
 def create_calendar_event_from_appointment(record: Dict[str, object]) -> None:
     """
@@ -124,7 +130,7 @@ def create_calendar_event_from_appointment(record: Dict[str, object]) -> None:
         f"Phone: {phone}",
         f"Location: {location}",
         "",
-        "Project description:",
+        "Project description / Reason for appointment:",
         project_description,
         "",
     ]
@@ -151,20 +157,26 @@ def create_calendar_event_from_appointment(record: Dict[str, object]) -> None:
         start_dt = parse_iso_utc(appointment_time_utc)
 
     if start_dt is None:
-        # fallback – както досега: +1 час
-        start_dt = datetime.utcnow() + timedelta(hours=1)
+        # fallback – както досега: +1 час, но timezone-aware UTC
+        start_dt = datetime.utcnow().replace(tzinfo=timezone.utc) + timedelta(hours=1)
 
     end_dt = start_dt + timedelta(hours=1)
+
+    # Уверяваме се, че и двата са timezone-aware UTC
+    if start_dt.tzinfo is None:
+        start_dt = start_dt.replace(tzinfo=timezone.utc)
+    if end_dt.tzinfo is None:
+        end_dt = end_dt.replace(tzinfo=timezone.utc)
 
     event_body = {
         "summary": summary,
         "description": description,
         "start": {
-            "dateTime": start_dt.isoformat() + "Z",
+            "dateTime": start_dt.isoformat(),  # напр. 2025-11-29T16:00:00+00:00
             "timeZone": "UTC",
         },
         "end": {
-            "dateTime": end_dt.isoformat() + "Z",
+            "dateTime": end_dt.isoformat(),
             "timeZone": "UTC",
         },
     }
@@ -300,7 +312,7 @@ VLT DATA SOLUTIONS е специализирана инженерна компа
 Работим в цяла Европа и помагаме на предприятия, колокационни центрове, облачни платформи и
 телеком оператори да изграждат и поддържат надеждни, високопроизводителни дейта центрове.
 
-Съчетаваме практически опит на терен с стриктно спазване на международни стандарти
+Съчетаваме практически опит на терен със стриктно спазване на международни стандарти
 (TIA/EIA, ISO/IEC, EN, BICSI) и принципи за Tier III / Tier IV инфраструктура.
 
 Кои сме ние — Профил на компанията
@@ -552,7 +564,7 @@ def _cosine_similarity(a: List[float], b: List[float]) -> float:
     nb = sqrt(sum(y * y for y in b))
     if na == 0 or nb == 0:
         return 0.0
-    return dot / nb / na
+    return dot / (na * nb)
 
 
 def find_relevant_pages(business_id: str, query: str, top_k: int = 3) -> List[Dict[str, str]]:
@@ -600,9 +612,10 @@ def build_site_context_message(business_id: str, user_query: str) -> Optional[st
         )
 
     joined = "\n\n---\n\n".join(parts)
+    biz_name = BUSINESSES.get(business_id, BUSINESSES["vlt_data"])["name"]
     return (
         "The following is trusted content taken directly from the official website "
-        f"of {BUSINESSES.get(business_id, BUSINESSES['vlt_data'])['name']}."
+        f"of {biz_name}."
         "\nUse it as an additional source of truth for:"
         "\n- product information (names, categories, sizes, models)"
         "\n- contact details (phone, email, address, working hours)"
@@ -852,7 +865,7 @@ def save_appointment(business_id: str, json_str: str) -> None:
 
         record = {
             "business_id": business_id,
-            "timestamp_utc": datetime.utcnow().isoformat() + "Z",
+            "timestamp_utc": datetime.utcnow().replace(tzinfo=timezone.utc).isoformat(),
             **data,
         }
 
@@ -897,7 +910,6 @@ def save_appointment(business_id: str, json_str: str) -> None:
                     "",
                 ]
 
-            # информация за времето
             if data.get("appointment_time_text"):
                 body_lines.append(f"Requested time (human text): {data.get('appointment_time_text')}")
             if data.get("appointment_time_utc"):
@@ -932,7 +944,7 @@ def save_contact_message(business_id: str, json_str: str) -> None:
 
         record = {
             "business_id": business_id,
-            "timestamp_utc": datetime.utcnow().isoformat() + "Z",
+            "timestamp_utc": datetime.utcnow().replace(tzinfo=timezone.utc).isoformat(),
             **data,
         }
 
@@ -1054,16 +1066,19 @@ async def chat(req: ChatRequest):
         raw_reply = completion.choices[0].message.content.strip()
         visible_reply = raw_reply
 
+        # Appointment marker
         if APPOINTMENT_MARKER in visible_reply:
             before, after = visible_reply.split(APPOINTMENT_MARKER, 1)
             visible_reply = before.strip()
             save_appointment(business_id, after.strip())
 
+        # Contact marker
         if CONTACT_MARKER in visible_reply:
             before, after = visible_reply.split(CONTACT_MARKER, 1)
             visible_reply = before.strip()
             save_contact_message(business_id, after.strip())
 
+        # Search marker
         if SEARCH_MARKER in visible_reply:
             before, after = visible_reply.split(SEARCH_MARKER, 1)
             visible_reply = before.strip()
