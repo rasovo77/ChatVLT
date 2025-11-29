@@ -43,7 +43,7 @@ client = OpenAI(api_key=OPENAI_API_KEY)
 # =========================
 
 GCAL_SCOPES = ["https://www.googleapis.com/auth/calendar"]
-GCAL_CALENDAR_ID = os.getenv("GOOGLE_CALENDAR_ID")  # напр. "primary" или "vvtcamp@gmail.com"
+GCAL_CALENDAR_ID = os.getenv("GOOGLE_CALENDAR_ID")  # "primary" или "vvtcamp@gmail.com"
 
 
 def get_gcal_service():
@@ -73,16 +73,13 @@ def parse_iso_utc(dt_str: str) -> Optional[datetime]:
     if not dt_str:
         return None
     try:
-        # Заменяме Z с +00:00, за да може fromisoformat да работи
         if dt_str.endswith("Z"):
             dt_str = dt_str[:-1] + "+00:00"
         dt = datetime.fromisoformat(dt_str)
 
-        # Ако има timezone, конвертираме към UTC
         if dt.tzinfo is not None:
             return dt.astimezone(timezone.utc)
 
-        # Ако е naive – приемаме, че вече е в UTC и го маркираме като такъв
         return dt.replace(tzinfo=timezone.utc)
     except Exception as e:
         logger.error(f"[GCAL] Failed to parse appointment_time_utc '{dt_str}': {e}")
@@ -114,13 +111,11 @@ def create_calendar_event_from_appointment(record: Dict[str, object]) -> None:
     appointment_time_text = record.get("appointment_time_text") or ""
     appointment_time_utc = record.get("appointment_time_utc") or ""
 
-    # Заглавие на събитието
     if company:
         summary = f"VLT DATA – {name} ({company})"
     else:
         summary = f"VLT DATA – {name}"
 
-    # Описание
     description_lines = [
         "New appointment request from ChatVLT.",
         "",
@@ -151,18 +146,15 @@ def create_calendar_event_from_appointment(record: Dict[str, object]) -> None:
 
     description = "\n".join(description_lines)
 
-    # Време на събитието
     start_dt = None
     if appointment_time_utc:
         start_dt = parse_iso_utc(appointment_time_utc)
 
     if start_dt is None:
-        # fallback – както досега: +1 час, но timezone-aware UTC
         start_dt = datetime.utcnow().replace(tzinfo=timezone.utc) + timedelta(hours=1)
 
     end_dt = start_dt + timedelta(hours=1)
 
-    # Уверяваме се, че и двата са timezone-aware UTC
     if start_dt.tzinfo is None:
         start_dt = start_dt.replace(tzinfo=timezone.utc)
     if end_dt.tzinfo is None:
@@ -172,7 +164,7 @@ def create_calendar_event_from_appointment(record: Dict[str, object]) -> None:
         "summary": summary,
         "description": description,
         "start": {
-            "dateTime": start_dt.isoformat(),  # напр. 2025-11-29T16:00:00+00:00
+            "dateTime": start_dt.isoformat(),
             "timeZone": "UTC",
         },
         "end": {
@@ -428,7 +420,7 @@ BUSINESSES = {
         "description_bg": BUSINESS_DESCRIPTION_BG,
         "tone_bg": "Професионален, спокоен, технически, но разбираем.",
         "tone_en": "Professional, calm and technical, but clear for non-technical people.",
-        "search_url_template": "https://vltdatasolutions.com/?s={query}"
+        "search_url_template": "https://vltdatasolutions.com/?s={query}",
     }
 }
 
@@ -500,7 +492,10 @@ def crawl_site(business_id: str) -> List[Dict[str, str]]:
                     continue
                 if not _is_same_domain(base_url, full):
                     continue
-                if any(full.lower().endswith(ext) for ext in [".jpg", ".jpeg", ".png", ".gif", ".pdf", ".zip", ".rar"]):
+                if any(
+                    full.lower().endswith(ext)
+                    for ext in [".jpg", ".jpeg", ".png", ".gif", ".pdf", ".zip", ".rar"]
+                ):
                     continue
                 to_visit.append(full)
         except Exception:
@@ -753,25 +748,64 @@ CONTACT MESSAGES (GENERAL QUESTIONS / SUPPORT):
 - Again, the JSON must be on a single line, valid, keys in English, and you must NOT mention
   this JSON in the visible answer. Just confirm that the {biz['name']} team will receive the message.
 
-SEARCH LINK HANDLING:
-- If the user asks you to "search the site", "show more information from the website",
-  "find products/services on the company's site" or similar, you should:
-  1) Keep answering normally in natural language.
-  2) At the very end, add ONE line with the format:
+SEARCH LINK HANDLING (SITE / E-COMMERCE PRODUCT SEARCH):
+- If the user asks you to:
+  * "search the site",
+  * "show more information from the website",
+  * "find products/services on the company's site",
+  * or they describe a product they are searching for (for example in Bulgarian:
+    "търся суитчер от памук размер L", "търся зимни гуми 205/55 R16",
+    "търся диван с размер 200 см", etc.)
+  then you should treat this as a PRODUCT/SERVICE SEARCH request.
+
+- First, try to understand the key attributes from the user message:
+  * product type (суитчер, гуми, диван, стол, телефон, пералня, etc.)
+  * brand or model (if mentioned)
+  * size / dimensions / tyre size / clothing size (например L, XL, 205/55 R16, 200x160 и т.н.)
+  * material (памук, кожа, дърво, метал, etc.) – ако е важно
+  * any other important filters (зимен/летен, дамски/мъжки, цвят, категория)
+
+- If some absolutely essential detail is missing and without it the search will be too generic,
+  you may ask 1-2 short clarifying questions. For example:
+  * "Търсите ли мъжки или дамски суитчер?"
+  * "Гумите да бъдат летни или зимни?"
+  * "Какъв точно размер търсите?"
+
+- Once you have enough information for a useful search, you MUST:
+  1) Answer the user in natural language (BG or EN) and explain
+     that you will send them a link to the search results / relevant page.
+  2) Compose a short search query string that combines the most important attributes,
+     e.g.:
+     - "суитчер памук L"
+     - "зимни гуми 205/55 R16"
+     - "диван 200 см ъглов"
+  3) At the VERY END of your answer add ONE line with the format:
 
      {SEARCH_MARKER} {{
-       "query": "keywords in English or Bulgarian describing what to search"
+       "query": "the composed search string"
      }}
 
-- The "query" should be short but meaningful (e.g. "rack & containment", "fiber cabling", "optical links").
-- DO NOT explain this JSON in your answer. It is only for the backend to generate a search URL.
+- The "query" must be short but meaningful. DO NOT include explanations in it,
+  only keywords. Examples:
+  * "суитчер памук L"
+  * "winter tyres 205/55 R16"
+  * "office desk 160 cm"
+  * "rack & containment"
+  * "fiber optic cabling"
+
+- You MUST NOT explain this JSON in your visible answer. It is only for the backend,
+  which will generate the actual search URL on the website and show it to the user as a clickable link.
 
 TASK:
-- Answer only about data center infrastructure, services and capabilities of {biz['name']}.
+- Answer only about data center infrastructure, services and capabilities of {biz['name']} OR,
+  when the project is installed on a different business site (e.g. e-commerce store),
+  use the same rules for appointments, contact messages and product/service search.
 - If the user asks something unrelated (weather, politics, random topics),
-  politely explain that your role is to assist only with the services and expertise of {biz['name']}.
+  politely explain that your role is to assist with the business and services behind the site
+  where the chatbot is installed.
 - For contact or projects, encourage the user to briefly describe their project
-  (new data center, upgrade, migration, maintenance) and then collect the data as explained above.
+  (new data center, upgrade, migration, maintenance or similar) and then collect the data as
+  explained above.
 """
 
 
@@ -928,7 +962,6 @@ def save_appointment(business_id: str, json_str: str) -> None:
             body = "\n".join(body_lines)
             send_email(subject, body, to_email)
 
-        # Google Calendar събитие
         create_calendar_event_from_appointment(record)
 
     except Exception as e:
@@ -1066,19 +1099,16 @@ async def chat(req: ChatRequest):
         raw_reply = completion.choices[0].message.content.strip()
         visible_reply = raw_reply
 
-        # Appointment marker
         if APPOINTMENT_MARKER in visible_reply:
             before, after = visible_reply.split(APPOINTMENT_MARKER, 1)
             visible_reply = before.strip()
             save_appointment(business_id, after.strip())
 
-        # Contact marker
         if CONTACT_MARKER in visible_reply:
             before, after = visible_reply.split(CONTACT_MARKER, 1)
             visible_reply = before.strip()
             save_contact_message(business_id, after.strip())
 
-        # Search marker
         if SEARCH_MARKER in visible_reply:
             before, after = visible_reply.split(SEARCH_MARKER, 1)
             visible_reply = before.strip()
